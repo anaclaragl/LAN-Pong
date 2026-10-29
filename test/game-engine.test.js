@@ -13,7 +13,7 @@ test('GameEngine initializes with correct configuration and default values', () 
   assert.equal(snapshot.paddles.player1, 0.5);
   assert.equal(snapshot.paddles.player2, 0.5);
   assert.equal(snapshot.winner, null);
-  assert.equal(engine.config.WINNING_SCORE, 10);
+  assert.equal(engine.config.WINNING_SCORE, CONFIG.WINNING_SCORE);
   assert.equal(engine.config.COURT_ASPECT_RATIO, 0.75);
 });
 

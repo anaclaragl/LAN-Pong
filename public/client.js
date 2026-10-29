@@ -515,6 +515,10 @@ function connect(address) {
       messageTitle.textContent = 'MATCH FULL';
       messageText.textContent = 'A 2-player match is already in progress on this host.';
       showScreen(screenMessage);
+    } else if (event.reason === 'Too many connections from this IP') {
+      messageTitle.textContent = 'CONNECTION LIMIT';
+      messageText.textContent = 'Too many active connections from your IP address.';
+      showScreen(screenMessage);
     } else if (latestState && latestState.phase !== 'ended') {
       messageTitle.textContent = 'DISCONNECTED';
       messageText.textContent = 'Connection to the match server was lost.';

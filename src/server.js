@@ -92,7 +92,7 @@ export function createHttpHandler(engineProvider) {
 }
 
 export class PongServer {
-  constructor(port = CONFIG.PORT) {
+  constructor(port = CONFIG.PORT, options = {}) {
     this.initialPort = port;
     this.port = port;
     this.engine = new GameEngine();
@@ -100,6 +100,8 @@ export class PongServer {
       player1: null, // Host (WebSocket)
       player2: null, // Guest (WebSocket)
     };
+    this.ipConnections = new Map();
+    this.maxConnectionsPerIp = options.maxConnectionsPerIp ?? CONFIG.SECURITY?.MAX_CONNECTIONS_PER_IP ?? 2;
     this.gameLoopInterval = null;
     this.bonjour = null;
     this.httpServer = null;
@@ -138,7 +140,44 @@ export class PongServer {
   setupWebSocketServer() {
     this.wss = new WebSocketServer({ server: this.httpServer });
 
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      // 1. IP Connection Limiting
+      const clientIp = req?.socket?.remoteAddress || '127.0.0.1';
+      const currentIpCount = this.ipConnections.get(clientIp) || 0;
+      const maxPerIp = this.maxConnectionsPerIp;
+
+      if (currentIpCount >= maxPerIp) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Too many connections from this IP' }));
+        ws.close(1008, 'Too many connections from this IP');
+        return;
+      }
+
+      this.ipConnections.set(clientIp, currentIpCount + 1);
+      ws.clientIp = clientIp;
+
+      // Rate limit tracker per socket
+      ws.rateLimit = {
+        count: 0,
+        windowStart: Date.now(),
+      };
+
+      // Anti-teleport / paddle tracking
+      ws.lastPaddleX = 0.5;
+      ws.lastPaddleTime = performance.now();
+
+      ws.on('close', () => {
+        if (ws.clientIp) {
+          const count = this.ipConnections.get(ws.clientIp) || 1;
+          if (count <= 1) {
+            this.ipConnections.delete(ws.clientIp);
+          } else {
+            this.ipConnections.set(ws.clientIp, count - 1);
+          }
+          ws.clientIp = null;
+        }
+        this.handleClientDisconnect(ws);
+      });
+
       // Determine player slot
       let role = null;
       if (!this.clients.player1 || this.clients.player1.readyState !== WebSocket.OPEN) {
@@ -163,10 +202,6 @@ export class PongServer {
         } catch (e) {
           console.error('Invalid message received:', e.message);
         }
-      });
-
-      ws.on('close', () => {
-        this.handleClientDisconnect(ws);
       });
 
       // If both players are connected, start the match!
@@ -198,11 +233,51 @@ export class PongServer {
   }
 
   handleClientMessage(ws, message) {
+    if (!message || typeof message !== 'object') return;
+
+    // Per-connection rate limiting
+    const nowMs = Date.now();
+    const maxRate = CONFIG.SECURITY?.MAX_PADDLE_RATE_PER_SEC ?? 70;
+    if (!ws.rateLimit) {
+      ws.rateLimit = { count: 0, windowStart: nowMs };
+    }
+    if (nowMs - ws.rateLimit.windowStart >= 1000) {
+      ws.rateLimit.windowStart = nowMs;
+      ws.rateLimit.count = 0;
+    }
+    ws.rateLimit.count++;
+    if (ws.rateLimit.count > maxRate) {
+      // Discard excess message silently to protect server performance
+      return;
+    }
+
     switch (message.type) {
       case 'paddle': {
-        if (typeof message.x === 'number') {
-          this.engine.setPaddlePosition(ws.role, message.x);
+        // 1. Validate number, finite, within bounds [0.0, 1.0]
+        if (typeof message.x !== 'number' || !Number.isFinite(message.x) || message.x < 0.0 || message.x > 1.0) {
+          return;
         }
+
+        // 2. Anti-teleportation & velocity limit
+        const nowPerf = performance.now();
+        const minDt = CONFIG.SECURITY?.MIN_DELTA_TIME_SEC ?? 0.005;
+        const maxSpeed = CONFIG.SECURITY?.MAX_PADDLE_SPEED ?? 5.0;
+        const jitterTol = CONFIG.SECURITY?.JITTER_TOLERANCE ?? 0.05;
+
+        const dt = Math.max(minDt, (nowPerf - (ws.lastPaddleTime ?? nowPerf)) / 1000);
+        const maxAllowedDist = (maxSpeed * dt) + jitterTol;
+        const currentX = ws.lastPaddleX ?? 0.5;
+        const deltaX = message.x - currentX;
+        const dist = Math.abs(deltaX);
+
+        let targetX = message.x;
+        if (dist > maxAllowedDist) {
+          targetX = currentX + Math.sign(deltaX) * maxAllowedDist;
+        }
+
+        ws.lastPaddleX = targetX;
+        ws.lastPaddleTime = nowPerf;
+        this.engine.setPaddlePosition(ws.role, targetX);
         break;
       }
       case 'customize': {
@@ -220,14 +295,6 @@ export class PongServer {
             trail: ws.customTrail || null,
           });
           break;
-        }
-        if (false) {
-
-          this.broadcast({
-            type: 'player_custom',
-            role: ws.role,
-            color: message.color,
-          });
         }
         break;
       }
@@ -266,10 +333,14 @@ export class PongServer {
     this.engine.resetMatch();
     this.engine.startCountdown(false);
 
-    const colors = {
-      player1: this.clients.player1?.customColor || null,
-      player2: this.clients.player2?.customColor || null,
-    };
+    if (this.clients.player1) {
+      this.clients.player1.lastPaddleX = 0.5;
+      this.clients.player1.lastPaddleTime = performance.now();
+    }
+    if (this.clients.player2) {
+      this.clients.player2.lastPaddleX = 0.5;
+      this.clients.player2.lastPaddleTime = performance.now();
+    }
 
     // Send 'start' message to each client with their role
     if (this.clients.player1?.readyState === WebSocket.OPEN) {
@@ -279,12 +350,12 @@ export class PongServer {
           role: 'player1',
           config: CONFIG,
           state: this.engine.getSnapshot(),
-            colors: {
-              player1: this.clients.player1?.customColor || null,
-              trails_player1: this.clients.player1?.customTrail || null,
-              player2: this.clients.player2?.customColor || null,
-              trails_player2: this.clients.player2?.customTrail || null,
-            },
+          colors: {
+            player1: this.clients.player1?.customColor || null,
+            trails_player1: this.clients.player1?.customTrail || null,
+            player2: this.clients.player2?.customColor || null,
+            trails_player2: this.clients.player2?.customTrail || null,
+          },
         })
       );
     }
@@ -296,12 +367,12 @@ export class PongServer {
           role: 'player2',
           config: CONFIG,
           state: this.engine.getSnapshot(),
-            colors: {
-              player1: this.clients.player1?.customColor || null,
-              trails_player1: this.clients.player1?.customTrail || null,
-              player2: this.clients.player2?.customColor || null,
-              trails_player2: this.clients.player2?.customTrail || null,
-            },
+          colors: {
+            player1: this.clients.player1?.customColor || null,
+            trails_player1: this.clients.player1?.customTrail || null,
+            player2: this.clients.player2?.customColor || null,
+            trails_player2: this.clients.player2?.customTrail || null,
+          },
         })
       );
     }
@@ -409,6 +480,8 @@ export class PongServer {
       this.httpServer.closeAllConnections?.();
       this.httpServer = null;
     }
+
+    this.ipConnections.clear();
   }
 }
 

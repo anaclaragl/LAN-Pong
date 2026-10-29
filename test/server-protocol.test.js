@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
 import { PongServer } from '../src/server.js';
 
+process.env.NODE_ENV = 'test';
+
 test('PongServer starts and serves /api/info and static assets', async () => {
   const server = new PongServer(0); // 0 lets OS assign free port
   const port = await server.start();
@@ -42,7 +44,8 @@ test('PongServer starts and serves /api/info and static assets', async () => {
 });
 
 test('PongServer manages 2-player match lifecycle and rejects 3rd player', async () => {
-  const server = new PongServer(0);
+  // Allow multiple connections from localhost for this protocol test to reach "Match full"
+  const server = new PongServer(0, { maxConnectionsPerIp: 10 });
   const port = await server.start();
 
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -78,7 +81,7 @@ test('PongServer manages 2-player match lifecycle and rejects 3rd player', async
     assert.ok(p2Start, 'Player 2 should receive start message');
     assert.equal(p2Start.role, 'player2');
 
-    // 3. Connect 3rd player (should be rejected)
+    // 3. Connect 3rd player (should be rejected as match full)
     const p3 = new WebSocket(wsUrl);
     const p3Messages = [];
     p3.on('message', (d) => p3Messages.push(JSON.parse(d.toString())));

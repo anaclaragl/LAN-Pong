@@ -13,5 +13,11 @@ export const CONFIG = {
   MAX_BOUNCE_ANGLE_DEG: 60,    // maximum exit angle off the paddle
   PORT: 8080,                  // match server port
   HOST_NAME: 'pong',           // mDNS name (pong.local)
+  SECURITY: {
+    MAX_PADDLE_SPEED: 5.0,         // max fraction of court width traversable per second
+    JITTER_TOLERANCE: 0.05,        // extra position slack to account for network/timer jitter
+    MAX_PADDLE_RATE_PER_SEC: 70,   // max messages per second per client socket
+    MAX_CONNECTIONS_PER_IP: 2,     // max simultaneous active connections per IP address
+    MIN_DELTA_TIME_SEC: 0.005,     // minimum dt floor to avoid divide-by-zero
+  },
 };
-
