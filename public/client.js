@@ -8,6 +8,7 @@ const ctx = canvas.getContext('2d');
 const screenMenu = document.getElementById('screen-menu');
 const screenWaiting = document.getElementById('screen-waiting');
 const screenJoin = document.getElementById('screen-join');
+const screenInventory = document.getElementById('screen-inventory');
 const screenCountdown = document.getElementById('screen-countdown');
 const screenGameOver = document.getElementById('screen-gameover');
 const screenMessage = document.getElementById('screen-message');
@@ -19,6 +20,8 @@ const messageTitle = document.getElementById('message-title');
 const messageText = document.getElementById('message-text');
 
 const btnCreate = document.getElementById('btn-create');
+const btnInventory = document.getElementById('btn-inventory');
+const btnCancelInventory = document.getElementById('btn-cancel-inventory');
 const btnShowJoin = document.getElementById('btn-show-join');
 const btnCancelWaiting = document.getElementById('btn-cancel-waiting');
 const btnConnect = document.getElementById('btn-connect');
@@ -27,6 +30,10 @@ const btnRematch = document.getElementById('btn-rematch');
 const btnMessageAck = document.getElementById('btn-message-ack');
 const hostAddressInput = document.getElementById('host-address');
 const themeToggleBtn = document.getElementById('theme-toggle');
+
+const inventoryColorsContainer = document.getElementById('inventory-colors');
+const previewPaddle = document.getElementById('preview-paddle');
+const previewColorName = document.getElementById('preview-color-name');
 
 const infoMdns = document.getElementById('info-mdns');
 const infoIp = document.getElementById('info-ip');
@@ -38,6 +45,30 @@ let latestState = null;
 let lastSentPaddleX = null;
 let lastPaddleSendTime = 0;
 let hostInfo = null;
+
+// Inventory & Customization State
+const PADDLE_COLORS = [
+  { id: 'default', name: 'CLASSIC', hex: null },
+  { id: 'cyan', name: 'CYAN', hex: '#00F0FF' },
+  { id: 'green', name: 'NEON GREEN', hex: '#00FF66' },
+  { id: 'pink', name: 'HOT PINK', hex: '#FF007F' },
+  { id: 'yellow', name: 'YELLOW', hex: '#FFE600' },
+  { id: 'orange', name: 'ORANGE', hex: '#FF6600' },
+  { id: 'red', name: 'CRIMSON', hex: '#FF2A2A' },
+  { id: 'purple', name: 'PURPLE', hex: '#B026FF' },
+];
+
+let selectedColorId = localStorage.getItem('pong-paddle-color') || 'default';
+let opponentColorId = null;
+
+function getColorObj(id) {
+  return PADDLE_COLORS.find((c) => c.id === id) || PADDLE_COLORS[0];
+}
+
+function resolveColorHex(colorId, fallbackHex) {
+  const c = getColorObj(colorId);
+  return c.hex || fallbackHex;
+}
 
 // Theme management
 function initTheme() {
@@ -52,13 +83,78 @@ if (themeToggleBtn) {
     document.body.classList.toggle('light-mode');
     const isLight = document.body.classList.contains('light-mode');
     localStorage.setItem('pong-theme', isLight ? 'light' : 'dark');
+    updatePreview(selectedColorId);
   });
+}
+
+// Inventory management
+function initInventory() {
+  if (!inventoryColorsContainer) return;
+  inventoryColorsContainer.innerHTML = '';
+
+  PADDLE_COLORS.forEach((color) => {
+    const btn = document.createElement('button');
+    btn.className = `color-option ${color.id === selectedColorId ? 'active' : ''}`;
+    btn.dataset.colorId = color.id;
+    btn.title = color.name;
+    btn.setAttribute('aria-label', color.name);
+
+    const swatch = document.createElement('span');
+    swatch.className = `color-swatch ${color.id === 'default' ? 'swatch-default' : ''}`;
+    if (color.hex) {
+      swatch.style.backgroundColor = color.hex;
+    }
+
+    btn.appendChild(swatch);
+
+    btn.addEventListener('mouseenter', () => {
+      updatePreview(color.id);
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      updatePreview(selectedColorId);
+    });
+
+    btn.addEventListener('click', () => {
+      selectedColorId = color.id;
+      localStorage.setItem('pong-paddle-color', selectedColorId);
+      updateInventoryActiveBtn();
+      updatePreview(selectedColorId);
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'customize', color: selectedColorId }));
+      }
+    });
+
+    inventoryColorsContainer.appendChild(btn);
+  });
+
+  updatePreview(selectedColorId);
+}
+
+function updateInventoryActiveBtn() {
+  const buttons = inventoryColorsContainer?.querySelectorAll('.color-option');
+  buttons?.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.colorId === selectedColorId);
+  });
+}
+
+function updatePreview(colorId) {
+  const color = getColorObj(colorId);
+  if (previewColorName) {
+    previewColorName.textContent = color.name;
+  }
+  if (previewPaddle) {
+    const isLight = document.body.classList.contains('light-mode');
+    const fg = isLight ? '#000000' : '#FFFFFF';
+    previewPaddle.style.backgroundColor = color.hex || fg;
+  }
 }
 
 // Screen management
 function showScreen(screen) {
-  [screenMenu, screenWaiting, screenJoin, screenCountdown, screenGameOver, screenMessage].forEach((s) => {
-    s.classList.remove('active');
+  [screenMenu, screenWaiting, screenJoin, screenInventory, screenCountdown, screenGameOver, screenMessage].forEach((s) => {
+    s?.classList.remove('active');
   });
   if (screen) {
     screen.classList.add('active');
@@ -71,14 +167,15 @@ function showScreen(screen) {
     container.classList.remove('in-game');
   }
 
-  // Toggle button visibility: show only on Start Menu, Waiting for Opponent, and Join Match Screen
+  // Toggle button visibility: show only on Start Menu, Waiting for Opponent, Join Match, and Inventory
   if (themeToggleBtn) {
-    const isAllowedScreen = screen === screenMenu || screen === screenWaiting || screen === screenJoin;
+    const isAllowedScreen = screen === screenMenu || screen === screenWaiting || screen === screenJoin || screen === screenInventory;
     themeToggleBtn.classList.toggle('hidden', !isAllowedScreen);
   }
 }
 
 initTheme();
+initInventory();
 showScreen(screenMenu);
 
 // Fetch host info for display
@@ -168,6 +265,9 @@ function connect(address) {
 
   ws.onopen = () => {
     console.log('Connected to Pong server at', wsUrl);
+    if (selectedColorId && selectedColorId !== 'default') {
+      ws.send(JSON.stringify({ type: 'customize', color: selectedColorId }));
+    }
   };
 
   ws.onmessage = (event) => {
@@ -202,6 +302,10 @@ function handleServerMessage(msg) {
     case 'assigned':
       myRole = msg.role;
       latestState = msg.state;
+      if (msg.colors) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentColorId = msg.colors[oppRole] || null;
+      }
       if (myRole === 'player1') {
         showScreen(screenWaiting);
       }
@@ -211,10 +315,20 @@ function handleServerMessage(msg) {
       if (msg.role) {
         myRole = msg.role;
       }
+      if (msg.colors) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentColorId = msg.colors[oppRole] || null;
+      }
       latestState = msg.state;
       finalScore.textContent = '0 - 0';
       showScreen(screenCountdown);
       container.classList.add('in-game');
+      break;
+
+    case 'player_custom':
+      if (msg.role && msg.role !== myRole) {
+        opponentColorId = msg.color;
+      }
       break;
 
     case 'state':
@@ -277,6 +391,20 @@ function handleMatchEnd(winner, score) {
 btnCreate.addEventListener('click', () => {
   connect(window.location.host);
 });
+
+if (btnInventory) {
+  btnInventory.addEventListener('click', () => {
+    updateInventoryActiveBtn();
+    updatePreview(selectedColorId);
+    showScreen(screenInventory);
+  });
+}
+
+if (btnCancelInventory) {
+  btnCancelInventory.addEventListener('click', () => {
+    showScreen(screenMenu);
+  });
+}
 
 btnShowJoin.addEventListener('click', () => {
   showScreen(screenJoin);
@@ -374,24 +502,33 @@ function render() {
     const p2Y_screen = toScreenY(1.0 - 0.03 - CONFIG.PADDLE_HEIGHT);
     const p2X_screen = toScreenX(latestState.paddles.player2);
 
-    ctx.fillStyle = fgColor;
+    const myPaddleColor = resolveColorHex(selectedColorId, fgColor);
+    const oppPaddleColor = resolveColorHex(opponentColorId, fgColor);
+
+    const p1Color = myRole === 'player1' ? myPaddleColor : oppPaddleColor;
+    const p2Color = myRole === 'player2' ? myPaddleColor : oppPaddleColor;
 
     // When Host is rotated 180°, top & bottom swap visually:
     // P1 (Host) is rendered at bottom: p1Y_screen - paddleH
     // P2 (Guest) is rendered at top: p2Y_screen
     if (myRole === 'player1') {
       // Host view: P1 (self) is at bottom
+      ctx.fillStyle = p1Color;
       ctx.fillRect(p1X_screen - paddleW / 2, p1Y_screen - paddleH, paddleW, paddleH);
       // P2 (opponent) is at top
+      ctx.fillStyle = p2Color;
       ctx.fillRect(p2X_screen - paddleW / 2, p2Y_screen, paddleW, paddleH);
     } else {
       // Guest view: P1 (opponent) is at top
+      ctx.fillStyle = p1Color;
       ctx.fillRect(p1X_screen - paddleW / 2, p1Y_screen, paddleW, paddleH);
       // P2 (self) is at bottom
+      ctx.fillStyle = p2Color;
       ctx.fillRect(p2X_screen - paddleW / 2, p2Y_screen, paddleW, paddleH);
     }
 
-    // Ball (white square)
+    // Ball (theme square)
+    ctx.fillStyle = fgColor;
     const ballW = CONFIG.BALL_SIZE * W;
     const ballH = CONFIG.BALL_SIZE * CONFIG.COURT_ASPECT_RATIO * H;
     const ballScreenX = toScreenX(latestState.ball.x);

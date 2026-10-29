@@ -185,6 +185,10 @@ export class PongServer {
             role: ws.role,
             config: CONFIG,
             state: this.engine.getSnapshot(),
+            colors: {
+              player1: this.clients.player1?.customColor || null,
+              player2: this.clients.player2?.customColor || null,
+            },
           })
         );
       }
@@ -196,6 +200,17 @@ export class PongServer {
       case 'paddle': {
         if (typeof message.x === 'number') {
           this.engine.setPaddlePosition(ws.role, message.x);
+        }
+        break;
+      }
+      case 'customize': {
+        if (typeof message.color === 'string') {
+          ws.customColor = message.color;
+          this.broadcast({
+            type: 'player_custom',
+            role: ws.role,
+            color: message.color,
+          });
         }
         break;
       }
@@ -234,6 +249,11 @@ export class PongServer {
     this.engine.resetMatch();
     this.engine.startCountdown(false);
 
+    const colors = {
+      player1: this.clients.player1?.customColor || null,
+      player2: this.clients.player2?.customColor || null,
+    };
+
     // Send 'start' message to each client with their role
     if (this.clients.player1?.readyState === WebSocket.OPEN) {
       this.clients.player1.send(
@@ -242,6 +262,10 @@ export class PongServer {
           role: 'player1',
           config: CONFIG,
           state: this.engine.getSnapshot(),
+            colors: {
+              player1: this.clients.player1?.customColor || null,
+              player2: this.clients.player2?.customColor || null,
+            },
         })
       );
     }
@@ -253,6 +277,10 @@ export class PongServer {
           role: 'player2',
           config: CONFIG,
           state: this.engine.getSnapshot(),
+            colors: {
+              player1: this.clients.player1?.customColor || null,
+              player2: this.clients.player2?.customColor || null,
+            },
         })
       );
     }

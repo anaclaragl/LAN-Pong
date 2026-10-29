@@ -80,6 +80,25 @@
         <button id="btn-rematch" class="btn">PLAY AGAIN</button>
       </div>
 
+      <!-- Screen 6: Inventory -->
+      <div id="screen-inventory" class="screen">
+        <h2 class="screen-title">INVENTORY</h2>
+        <p class="subtitle" style="margin-bottom: 20px;">CUSTOMIZE PADDLE</p>
+
+        <!-- Preview Box -->
+        <div class="inventory-preview-box">
+          <div class="preview-court">
+            <div id="preview-paddle" class="preview-paddle"></div>
+          </div>
+          <span id="preview-color-name" class="preview-color-name">CLASSIC</span>
+        </div>
+
+        <!-- Color Palette Grid -->
+        <div class="inventory-grid" id="inventory-colors"></div>
+
+        <button id="btn-cancel-inventory" class="btn" style="margin-top: 24px;">BACK</button>
+      </div>
+
       <!-- Notification / Error Box -->
       <div id="screen-message" class="screen">
         <h2 id="message-title" class="screen-title">DISCONNECTED</h2>
@@ -87,17 +106,8 @@
         <button id="btn-message-ack" class="btn">BACK TO MENU</button>
       </div>
     </div>
-
-    <div>
-      <h2 id="inventory-title">Inventory</h2>
-      <div id="inventory">
-      </div>
-    </div>
   </div>
-
-
 
   <script type="module" src="client.js"></script>
 </body>
-
 </html>

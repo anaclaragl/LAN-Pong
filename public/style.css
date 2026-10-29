@@ -263,3 +263,85 @@ body.light-mode .theme-toggle .moon-icon {
   margin-bottom: 24px;
   line-height: 1.5;
 }
+
+/* Inventory Screen */
+.inventory-preview-box {
+  width: 90%;
+  max-width: 320px;
+  border: 2px solid var(--fg-color);
+  padding: 14px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background-color: var(--bg-color);
+}
+
+.preview-court {
+  width: 100%;
+  height: 56px;
+  border: 1px dashed var(--fg-color);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--bg-color);
+}
+
+.preview-paddle {
+  width: 36%;
+  height: 10px;
+  background-color: var(--fg-color);
+  transition: background-color 0.15s ease;
+}
+
+.preview-color-name {
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--fg-color);
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  width: 90%;
+  max-width: 320px;
+}
+
+.color-option {
+  height: 50px;
+  border: 2px solid var(--fg-color);
+  background-color: var(--bg-color);
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 4px;
+  transition: transform 0.12s ease;
+}
+
+.color-option:hover {
+  transform: scale(1.06);
+}
+
+.color-option:focus {
+  outline: none;
+}
+
+.color-option.active {
+  box-shadow: inset 0 0 0 3px var(--bg-color), inset 0 0 0 5px var(--fg-color) !important;
+  border-width: 3px;
+}
+
+.color-swatch {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.swatch-default {
+  background-color: var(--fg-color);
+}
