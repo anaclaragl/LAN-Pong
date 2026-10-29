@@ -26,6 +26,7 @@ const btnCancelJoin = document.getElementById('btn-cancel-join');
 const btnRematch = document.getElementById('btn-rematch');
 const btnMessageAck = document.getElementById('btn-message-ack');
 const hostAddressInput = document.getElementById('host-address');
+const themeToggleBtn = document.getElementById('theme-toggle');
 
 const infoMdns = document.getElementById('info-mdns');
 const infoIp = document.getElementById('info-ip');
@@ -37,6 +38,22 @@ let latestState = null;
 let lastSentPaddleX = null;
 let lastPaddleSendTime = 0;
 let hostInfo = null;
+
+// Theme management
+function initTheme() {
+  const savedTheme = localStorage.getItem('pong-theme');
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-mode');
+  }
+}
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener('click', () => {
+    document.body.classList.toggle('light-mode');
+    const isLight = document.body.classList.contains('light-mode');
+    localStorage.setItem('pong-theme', isLight ? 'light' : 'dark');
+  });
+}
 
 // Screen management
 function showScreen(screen) {
@@ -53,7 +70,16 @@ function showScreen(screen) {
   } else {
     container.classList.remove('in-game');
   }
+
+  // Toggle button visibility: show only on Start Menu, Waiting for Opponent, and Join Match Screen
+  if (themeToggleBtn) {
+    const isAllowedScreen = screen === screenMenu || screen === screenWaiting || screen === screenJoin;
+    themeToggleBtn.classList.toggle('hidden', !isAllowedScreen);
+  }
 }
+
+initTheme();
+showScreen(screenMenu);
 
 // Fetch host info for display
 async function fetchHostInfo() {
@@ -288,12 +314,16 @@ function render() {
   const W = rect.width;
   const H = rect.height;
 
+  const isLight = document.body.classList.contains('light-mode');
+  const bgColor = isLight ? '#FFFFFF' : '#000000';
+  const fgColor = isLight ? '#000000' : '#FFFFFF';
+
   // Clear court
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, W, H);
 
   // Decorative dashed center line
-  ctx.strokeStyle = '#FFFFFF';
+  ctx.strokeStyle = fgColor;
   ctx.lineWidth = 2;
   ctx.setLineDash([8, 8]);
   ctx.beginPath();
@@ -310,7 +340,7 @@ function render() {
     const myScore = myRole === 'player1' ? p1Score : p2Score;
     const oppScore = myRole === 'player1' ? p2Score : p1Score;
 
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = fgColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -340,7 +370,7 @@ function render() {
     const p2Y_screen = toScreenY(1.0 - 0.03 - CONFIG.PADDLE_HEIGHT);
     const p2X_screen = toScreenX(latestState.paddles.player2);
 
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = fgColor;
 
     // When Host is rotated 180°, top & bottom swap visually:
     // P1 (Host) is rendered at bottom: p1Y_screen - paddleH
@@ -375,4 +405,3 @@ function render() {
 // Initial setup
 fetchHostInfo();
 render();
-
