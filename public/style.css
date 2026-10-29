@@ -1,0 +1,199 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body {
+  background-color: #000000;
+  color: #FFFFFF;
+  font-family: 'Consolas', 'Courier New', Courier, monospace;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+}
+
+#game-container {
+  position: relative;
+  /* 3:4 aspect ratio: height = width * 4/3 */
+  width: min(75vh, 90vw);
+  height: min(100vh, 120vw);
+  max-width: 600px;
+  max-height: 800px;
+  background-color: #000000;
+  border: 4px solid #FFFFFF;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#game-container.in-game {
+  cursor: none;
+}
+
+#court {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#ui-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+}
+
+.screen {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 24px;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  pointer-events: auto;
+}
+
+.screen.active {
+  display: flex;
+}
+
+.screen.hud {
+  background-color: transparent;
+  pointer-events: none;
+}
+
+.game-title {
+  font-size: 48px;
+  letter-spacing: 8px;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.subtitle {
+  font-size: 14px;
+  letter-spacing: 2px;
+  margin-bottom: 40px;
+}
+
+.screen-title {
+  font-size: 20px;
+  letter-spacing: 2px;
+  margin-bottom: 24px;
+  font-weight: bold;
+}
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 80%;
+  max-width: 260px;
+}
+
+.btn {
+  background-color: #000000;
+  color: #FFFFFF;
+  border: 2px solid #FFFFFF;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-family: inherit;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
+.btn:hover,
+.btn:focus {
+  background-color: #FFFFFF;
+  color: #000000;
+  outline: none;
+}
+
+.info-box {
+  border: 2px solid #FFFFFF;
+  padding: 16px;
+  margin-bottom: 24px;
+  width: 90%;
+  max-width: 320px;
+}
+
+.info-label {
+  font-size: 12px;
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.info-val {
+  font-size: 14px;
+  font-weight: bold;
+  word-break: break-all;
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 85%;
+  max-width: 300px;
+}
+
+.input-label {
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-align: left;
+}
+
+.input-text {
+  background-color: #000000;
+  color: #FFFFFF;
+  border: 2px solid #FFFFFF;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.input-text:focus {
+  border-color: #FFFFFF;
+}
+
+.countdown-text {
+  font-size: 72px;
+  font-weight: bold;
+  letter-spacing: 4px;
+}
+
+.final-score-text {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 32px;
+  letter-spacing: 4px;
+}
+
+.message-desc {
+  font-size: 14px;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+

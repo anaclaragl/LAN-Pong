@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PONG - LAN</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- Canvas for court rendering -->
+    <canvas id="court"></canvas>
+
+    <!-- UI Overlay for Menus and Prompts -->
+    <div id="ui-overlay">
+      <!-- Screen 1: Start Menu -->
+      <div id="screen-menu" class="screen active">
+        <h1 class="game-title">PONG</h1>
+        <p class="subtitle">LOCAL NETWORK (LAN)</p>
+        <div class="menu-actions">
+          <button id="btn-create" class="btn">CREATE MATCH</button>
+          <button id="btn-show-join" class="btn">JOIN MATCH</button>
+        </div>
+      </div>
+
+      <!-- Screen 2: Waiting for Opponent -->
+      <div id="screen-waiting" class="screen">
+        <h2 class="screen-title">WAITING FOR OPPONENT...</h2>
+        <div class="info-box">
+          <p class="info-label">GUEST SHOULD OPEN EITHER ADDRESS:</p>
+          <p id="info-mdns" class="info-val">http://pong.local:8080</p>
+          <p id="info-ip" class="info-val">http://192.168.x.x:8080</p>
+        </div>
+        <button id="btn-cancel-waiting" class="btn">CANCEL</button>
+      </div>
+
+      <!-- Screen 3: Join Match -->
+      <div id="screen-join" class="screen">
+        <h2 class="screen-title">CONNECT TO MATCH</h2>
+        <div class="join-form">
+          <label for="host-address" class="input-label">HOST ADDRESS OR IP:</label>
+          <input type="text" id="host-address" class="input-text" placeholder="pong.local:8080 or IP:8080">
+          <button id="btn-connect" class="btn">CONNECT</button>
+          <button id="btn-cancel-join" class="btn">BACK</button>
+        </div>
+      </div>
+
+      <!-- Screen 4: Countdown HUD -->
+      <div id="screen-countdown" class="screen hud">
+        <div id="countdown-number" class="countdown-text">3</div>
+      </div>
+
+      <!-- Screen 5: Game Over -->
+      <div id="screen-gameover" class="screen">
+        <h2 id="winner-banner" class="game-title">YOU WON!</h2>
+        <p id="final-score" class="final-score-text">10 - 8</p>
+        <button id="btn-rematch" class="btn">PLAY AGAIN</button>
+      </div>
+
+      <!-- Notification / Error Box -->
+      <div id="screen-message" class="screen">
+        <h2 id="message-title" class="screen-title">DISCONNECTED</h2>
+        <p id="message-text" class="message-desc">Opponent disconnected.</p>
+        <button id="btn-message-ack" class="btn">BACK TO MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="client.js"></script>
+</body>
+</html>
+
