@@ -208,8 +208,11 @@ function handleServerMessage(msg) {
       break;
 
     case 'start':
-      myRole = msg.role;
+      if (msg.role) {
+        myRole = msg.role;
+      }
       latestState = msg.state;
+      finalScore.textContent = '0 - 0';
       showScreen(screenCountdown);
       container.classList.add('in-game');
       break;
@@ -259,11 +262,12 @@ function updateGameState() {
 }
 
 function handleMatchEnd(winner, score) {
+  const currentScore = score || latestState?.score || { player1: 0, player2: 0 };
   const isWinner = winner === myRole;
   winnerBanner.textContent = isWinner ? 'YOU WON!' : 'OPPONENT WON!';
-  
-  const myScore = myRole === 'player1' ? score.player1 : score.player2;
-  const oppScore = myRole === 'player1' ? score.player2 : score.player1;
+
+  const myScore = myRole === 'player1' ? (currentScore.player1 ?? 0) : (currentScore.player2 ?? 0);
+  const oppScore = myRole === 'player1' ? (currentScore.player2 ?? 0) : (currentScore.player1 ?? 0);
   finalScore.textContent = `${myScore} - ${oppScore}`;
 
   showScreen(screenGameOver);

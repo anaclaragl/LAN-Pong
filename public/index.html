@@ -41,6 +41,7 @@
         <p class="subtitle">LOCAL NETWORK (LAN)</p>
         <div class="menu-actions">
           <button id="btn-create" class="btn">CREATE MATCH</button>
+          <button id="btn-inventory" class="btn">INVENTORY</button>
           <button id="btn-show-join" class="btn">JOIN MATCH</button>
         </div>
       </div>
@@ -75,7 +76,7 @@
       <!-- Screen 5: Game Over -->
       <div id="screen-gameover" class="screen">
         <h2 id="winner-banner" class="game-title">YOU WON!</h2>
-        <p id="final-score" class="final-score-text">10 - 8</p>
+        <p id="final-score" class="final-score-text">0 - 0</p>
         <button id="btn-rematch" class="btn">PLAY AGAIN</button>
       </div>
 
@@ -86,7 +87,15 @@
         <button id="btn-message-ack" class="btn">BACK TO MENU</button>
       </div>
     </div>
+
+    <div>
+      <h2 id="inventory-title">Inventory</h2>
+      <div id="inventory">
+      </div>
+    </div>
   </div>
+
+
 
   <script type="module" src="client.js"></script>
 </body>
