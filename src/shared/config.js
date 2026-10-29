@@ -20,4 +20,7 @@ export const CONFIG = {
     MAX_CONNECTIONS_PER_IP: 2,     // max simultaneous active connections per IP address
     MIN_DELTA_TIME_SEC: 0.005,     // minimum dt floor to avoid divide-by-zero
   },
+  BOT: {
+    PADDLE_SPEED: 2.2,             // natural physical movement speed (court widths/sec)
+  },
 };

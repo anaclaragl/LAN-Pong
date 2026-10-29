@@ -58,8 +58,14 @@ export function createHttpHandler(engineProvider) {
     }
 
     let filePath;
-    if (reqPath.startsWith('/src/shared/') || reqPath === '/config.js') {
+    if (reqPath === '/config.js') {
       filePath = path.join(rootDir, 'src', 'shared', 'config.js');
+    } else if (
+      reqPath.startsWith('/src/shared/') ||
+      reqPath.startsWith('/src/engine/') ||
+      reqPath.startsWith('/src/ai/')
+    ) {
+      filePath = path.join(rootDir, reqPath);
     } else {
       filePath = path.join(publicDir, reqPath);
     }

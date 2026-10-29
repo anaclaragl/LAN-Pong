@@ -1,4 +1,6 @@
 import { CONFIG } from './config.js';
+import { GameEngine } from '/src/engine/game-engine.js';
+import { PongBot } from '/src/ai/bot.js';
 
 // DOM elements
 const container = document.getElementById('game-container');
@@ -19,6 +21,7 @@ const finalScore = document.getElementById('final-score');
 const messageTitle = document.getElementById('message-title');
 const messageText = document.getElementById('message-text');
 
+const btnVsBot = document.getElementById('btn-vs-bot');
 const btnCreate = document.getElementById('btn-create');
 const btnInventory = document.getElementById('btn-inventory');
 const btnCancelInventory = document.getElementById('btn-cancel-inventory');
@@ -27,6 +30,7 @@ const btnCancelWaiting = document.getElementById('btn-cancel-waiting');
 const btnConnect = document.getElementById('btn-connect');
 const btnCancelJoin = document.getElementById('btn-cancel-join');
 const btnRematch = document.getElementById('btn-rematch');
+const btnGameoverMenu = document.getElementById('btn-gameover-menu');
 const btnMessageAck = document.getElementById('btn-message-ack');
 const hostAddressInput = document.getElementById('host-address');
 const themeToggleBtn = document.getElementById('theme-toggle');
@@ -49,6 +53,12 @@ let latestState = null;
 let lastSentPaddleX = null;
 let lastPaddleSendTime = 0;
 let hostInfo = null;
+
+// Offline Mode State
+let isOfflineMode = false;
+let localEngine = null;
+let mlBot = null;
+let offlineInterval = null;
 
 // Inventory & Customization State
 const PADDLE_COLORS = [
@@ -460,6 +470,15 @@ function toScreenY(canonicalY) {
 
 // Mouse input handler
 container.addEventListener('mousemove', (event) => {
+  if (isOfflineMode) {
+    if (!localEngine || (latestState?.phase !== 'playing' && latestState?.phase !== 'countdown')) return;
+    const rect = container.getBoundingClientRect();
+    const mouseScreenX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+    const normalizedScreenX = mouseScreenX / rect.width;
+    localEngine.setPaddlePosition('player2', normalizedScreenX);
+    return;
+  }
+
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (!latestState || (latestState.phase !== 'playing' && latestState.phase !== 'countdown')) return;
 
@@ -483,8 +502,81 @@ container.addEventListener('mousemove', (event) => {
   }
 });
 
+// Offline ML Bot Match Management
+function startOfflineMatch() {
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+
+  isOfflineMode = true;
+  myRole = 'player2'; // Human plays at bottom, Bot plays at top as player1
+  opponentColorId = 'cyan';
+  opponentTrailId = 'matrix';
+
+  localEngine = new GameEngine();
+  mlBot = new PongBot(null, 'player1');
+  trailHistory.length = 0;
+  finalScore.textContent = '0 - 0';
+
+  localEngine.resetMatch();
+  localEngine.startCountdown(false);
+  latestState = localEngine.getSnapshot();
+
+  showScreen(screenCountdown);
+  container.classList.add('in-game');
+
+  if (offlineInterval) {
+    clearInterval(offlineInterval);
+  }
+
+  const intervalMs = 1000 / CONFIG.TICK_RATE_HZ;
+  const dt = 1 / CONFIG.TICK_RATE_HZ;
+
+  offlineInterval = setInterval(() => {
+    if (!isOfflineMode || !localEngine) return;
+
+    // 1. Bot computes paddle movement
+    const botX = mlBot.update(localEngine.getSnapshot(), dt);
+    localEngine.setPaddlePosition('player1', botX);
+
+    // 2. Physics tick
+    const evt = localEngine.tick(dt);
+    latestState = localEngine.getSnapshot();
+
+    if (evt) {
+      if (evt.type === 'point') {
+        updateGameState();
+      } else if (evt.type === 'end') {
+        updateGameState();
+        clearInterval(offlineInterval);
+        offlineInterval = null;
+        return;
+      }
+    }
+
+    updateGameState();
+  }, intervalMs);
+}
+
+function stopOfflineMode() {
+  isOfflineMode = false;
+  if (offlineInterval) {
+    clearInterval(offlineInterval);
+    offlineInterval = null;
+  }
+  localEngine = null;
+  mlBot = null;
+  latestState = null;
+  showScreen(screenMenu);
+}
+
 // WebSocket connection
 function connect(address) {
+  if (isOfflineMode) {
+    stopOfflineMode();
+  }
+
   const host = address || window.location.host || 'localhost:8080';
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${host}`;
@@ -496,7 +588,6 @@ function connect(address) {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    console.log('Connected to Pong server at', wsUrl);
     ws.send(JSON.stringify({ type: 'customize', color: selectedColorId, trail: selectedTrailId }));
   };
 
@@ -510,7 +601,6 @@ function connect(address) {
   };
 
   ws.onclose = (event) => {
-    console.log('WebSocket connection closed:', event.code, event.reason);
     if (event.reason === 'Match full') {
       messageTitle.textContent = 'MATCH FULL';
       messageText.textContent = 'A 2-player match is already in progress on this host.';
@@ -638,6 +728,12 @@ function handleMatchEnd(winner, score) {
 }
 
 // UI Button actions
+if (btnVsBot) {
+  btnVsBot.addEventListener('click', () => {
+    startOfflineMatch();
+  });
+}
+
 btnCreate.addEventListener('click', () => {
   connect(window.location.host);
 });
@@ -677,15 +773,36 @@ btnConnect.addEventListener('click', () => {
 });
 
 btnRematch.addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (isOfflineMode) {
+    startOfflineMatch();
+  } else if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'rematch' }));
   }
 });
+
+if (btnGameoverMenu) {
+  btnGameoverMenu.addEventListener('click', () => {
+    if (isOfflineMode) {
+      stopOfflineMode();
+    } else {
+      latestState = null;
+      if (ws) ws.close();
+      showScreen(screenMenu);
+    }
+  });
+}
 
 btnMessageAck.addEventListener('click', () => {
   latestState = null;
   if (ws) ws.close();
   showScreen(screenMenu);
+});
+
+// Escape key to leave offline match
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isOfflineMode) {
+    stopOfflineMode();
+  }
 });
 
 // Rendering Loop
@@ -727,8 +844,9 @@ function render() {
     ctx.textBaseline = 'middle';
 
     // Opponent score (Top half)
+    const oppLabel = isOfflineMode ? 'BOT' : 'OPPONENT';
     ctx.font = 'bold 12px Consolas, Courier, monospace';
-    ctx.fillText('OPPONENT', W / 2, H * 0.22);
+    ctx.fillText(oppLabel, W / 2, H * 0.22);
     ctx.font = 'bold 44px Consolas, Courier, monospace';
     ctx.fillText(String(oppScore), W / 2, H * 0.32);
 
