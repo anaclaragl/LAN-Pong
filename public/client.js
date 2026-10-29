@@ -31,9 +31,13 @@ const btnMessageAck = document.getElementById('btn-message-ack');
 const hostAddressInput = document.getElementById('host-address');
 const themeToggleBtn = document.getElementById('theme-toggle');
 
+const tabPaddle = document.getElementById('tab-paddle');
+const tabTrail = document.getElementById('tab-trail');
 const inventoryColorsContainer = document.getElementById('inventory-colors');
+const inventoryTrailsContainer = document.getElementById('inventory-trails');
 const previewPaddle = document.getElementById('preview-paddle');
-const previewColorName = document.getElementById('preview-color-name');
+const previewTrailCanvas = document.getElementById('preview-trail-canvas');
+const previewColorName = document.getElementById('preview-item-name') || document.getElementById('preview-color-name');
 
 const infoMdns = document.getElementById('info-mdns');
 const infoIp = document.getElementById('info-ip');
@@ -58,16 +62,87 @@ const PADDLE_COLORS = [
   { id: 'purple', name: 'PURPLE', hex: '#B026FF' },
 ];
 
+const BALL_TRAILS = [
+  { id: 'classic', name: 'CLASSIC', color: null, desc: 'Fading echoes' },
+  { id: 'cyan', name: 'CYAN LASER', color: '#00F0FF', desc: 'Laser beam' },
+  { id: 'fire', name: 'FIRE EMBER', color: '#FF4500', desc: 'Fiery blaze' },
+  { id: 'matrix', name: 'MATRIX', color: '#00FF66', desc: 'Digital pixels' },
+  { id: 'pink', name: 'SYNTH PINK', color: '#FF007F', desc: 'Magenta glow' },
+  { id: 'yellow', name: 'ELECTRIC', color: '#FFE600', desc: 'Golden lightning' },
+  { id: 'purple', name: 'PURPLE HAZE', color: '#B026FF', desc: 'Violet aura' },
+  { id: 'rainbow', name: 'RAINBOW', color: 'rainbow', desc: 'Chromatic prism' },
+];
+
 let selectedColorId = localStorage.getItem('pong-paddle-color') || 'default';
+let selectedTrailId = localStorage.getItem('pong-ball-trail') || 'classic';
 let opponentColorId = null;
+let opponentTrailId = null;
+let activeInvTab = 'paddle'; // 'paddle' | 'trail'
+
+// Trail buffer for active match
+const trailHistory = [];
+const MAX_TRAIL_LENGTH = 16;
 
 function getColorObj(id) {
   return PADDLE_COLORS.find((c) => c.id === id) || PADDLE_COLORS[0];
 }
 
+function getTrailObj(id) {
+  return BALL_TRAILS.find((t) => t.id === id) || BALL_TRAILS[0];
+}
+
 function resolveColorHex(colorId, fallbackHex) {
   const c = getColorObj(colorId);
   return c.hex || fallbackHex;
+}
+
+// Draw a single trail segment for either court or preview canvas
+function drawTrailSegment(targetCtx, p, alpha, fgColor) {
+  const trailId = p.trailId || 'classic';
+  const size = p.w * (0.35 + 0.65 * alpha);
+
+  targetCtx.save();
+  if (trailId === 'classic') {
+    targetCtx.fillStyle = fgColor;
+    targetCtx.globalAlpha = alpha * 0.4;
+    targetCtx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+  } else if (trailId === 'cyan') {
+    targetCtx.fillStyle = '#00F0FF';
+    targetCtx.globalAlpha = alpha * 0.65;
+    targetCtx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+  } else if (trailId === 'fire') {
+    const fireColors = ['#FF1100', '#FF4400', '#FF7700', '#FFAA00', '#FFEE33'];
+    const idx = Math.min(fireColors.length - 1, Math.floor(alpha * fireColors.length));
+    targetCtx.fillStyle = fireColors[idx];
+    targetCtx.globalAlpha = alpha * 0.8;
+    const jx = (Math.random() - 0.5) * (1 - alpha) * 4;
+    const jy = (Math.random() - 0.5) * (1 - alpha) * 4;
+    targetCtx.fillRect(p.x - size / 2 + jx, p.y - size / 2 + jy, size * 0.9, size * 0.9);
+  } else if (trailId === 'matrix') {
+    targetCtx.fillStyle = '#00FF66';
+    targetCtx.globalAlpha = alpha * 0.7;
+    const snapSize = Math.max(3, Math.round(size * 0.85));
+    targetCtx.fillRect(p.x - snapSize / 2, p.y - snapSize / 2, snapSize, snapSize);
+  } else if (trailId === 'pink') {
+    targetCtx.fillStyle = '#FF007F';
+    targetCtx.globalAlpha = alpha * 0.65;
+    targetCtx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+  } else if (trailId === 'yellow') {
+    targetCtx.fillStyle = '#FFE600';
+    targetCtx.globalAlpha = alpha * 0.7;
+    const spark = (Math.random() - 0.5) * 3;
+    targetCtx.fillRect(p.x - size / 2 + spark, p.y - size / 2, size, size);
+  } else if (trailId === 'purple') {
+    targetCtx.fillStyle = '#B026FF';
+    targetCtx.globalAlpha = alpha * 0.7;
+    targetCtx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+  } else if (trailId === 'rainbow') {
+    const hue = (p.time * 0.35 + alpha * 180) % 360;
+    targetCtx.fillStyle = `hsl(${hue}, 100%, 55%)`;
+    targetCtx.globalAlpha = alpha * 0.75;
+    targetCtx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+  }
+  targetCtx.restore();
 }
 
 // Theme management
@@ -83,12 +158,100 @@ if (themeToggleBtn) {
     document.body.classList.toggle('light-mode');
     const isLight = document.body.classList.contains('light-mode');
     localStorage.setItem('pong-theme', isLight ? 'light' : 'dark');
-    updatePreview(selectedColorId);
+    updatePreview(activeInvTab === 'paddle' ? selectedColorId : selectedTrailId);
   });
+}
+
+// Mini preview court animation for ball trail
+let previewBallX = 30;
+let previewBallY = 30;
+let previewBallVx = 2.2;
+let previewBallVy = 0.8;
+const previewTrailHistory = [];
+let currentPreviewTrailId = selectedTrailId;
+
+function runPreviewTrailAnimation() {
+  if (previewTrailCanvas) {
+    const pCtx = previewTrailCanvas.getContext('2d');
+    const rect = previewTrailCanvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      if (previewTrailCanvas.width !== rect.width || previewTrailCanvas.height !== rect.height) {
+        previewTrailCanvas.width = rect.width;
+        previewTrailCanvas.height = rect.height;
+      }
+      const W = previewTrailCanvas.width;
+      const H = previewTrailCanvas.height;
+
+      pCtx.clearRect(0, 0, W, H);
+
+      // Only draw mini ball trail if inventory screen is active
+      if (screenInventory?.classList.contains('active')) {
+        previewBallX += previewBallVx;
+        previewBallY += previewBallVy;
+        if (previewBallX <= 16 || previewBallX >= W - 16) previewBallVx *= -1;
+        if (previewBallY <= 10 || previewBallY >= H - 10) previewBallVy *= -1;
+
+        previewTrailHistory.push({
+          x: previewBallX,
+          y: previewBallY,
+          w: 8,
+          h: 8,
+          trailId: currentPreviewTrailId,
+          time: performance.now(),
+        });
+        if (previewTrailHistory.length > 14) previewTrailHistory.shift();
+
+        const isLight = document.body.classList.contains('light-mode');
+        const fg = isLight ? '#000000' : '#FFFFFF';
+
+        for (let i = 0; i < previewTrailHistory.length; i++) {
+          const p = previewTrailHistory[i];
+          const alpha = (i + 1) / previewTrailHistory.length;
+          drawTrailSegment(pCtx, p, alpha, fg);
+        }
+
+        // Draw preview ball
+        pCtx.fillStyle = fg;
+        pCtx.fillRect(previewBallX - 4, previewBallY - 4, 8, 8);
+      }
+    }
+  }
+
+  requestAnimationFrame(runPreviewTrailAnimation);
 }
 
 // Inventory management
 function initInventory() {
+  initPaddleColorsUI();
+  initBallTrailsUI();
+  setupInventoryTabs();
+  runPreviewTrailAnimation();
+  updatePreview(selectedColorId);
+}
+
+function setupInventoryTabs() {
+  tabPaddle?.addEventListener('click', () => {
+    activeInvTab = 'paddle';
+    tabPaddle.classList.add('active');
+    tabTrail?.classList.remove('active');
+    if (inventoryColorsContainer) inventoryColorsContainer.style.display = 'grid';
+    if (inventoryTrailsContainer) inventoryTrailsContainer.style.display = 'none';
+    currentPreviewTrailId = selectedTrailId;
+    updatePreview(selectedColorId);
+  });
+
+  tabTrail?.addEventListener('click', () => {
+    activeInvTab = 'trail';
+    tabTrail.classList.add('active');
+    tabPaddle?.classList.remove('active');
+    if (inventoryColorsContainer) inventoryColorsContainer.style.display = 'none';
+    if (inventoryTrailsContainer) inventoryTrailsContainer.style.display = 'grid';
+    currentPreviewTrailId = selectedTrailId;
+    updatePreview(selectedTrailId);
+  });
+}
+
+function initPaddleColorsUI() {
   if (!inventoryColorsContainer) return;
   inventoryColorsContainer.innerHTML = '';
 
@@ -108,11 +271,11 @@ function initInventory() {
     btn.appendChild(swatch);
 
     btn.addEventListener('mouseenter', () => {
-      updatePreview(color.id);
+      if (activeInvTab === 'paddle') updatePreview(color.id);
     });
 
     btn.addEventListener('mouseleave', () => {
-      updatePreview(selectedColorId);
+      if (activeInvTab === 'paddle') updatePreview(selectedColorId);
     });
 
     btn.addEventListener('click', () => {
@@ -122,32 +285,101 @@ function initInventory() {
       updatePreview(selectedColorId);
 
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'customize', color: selectedColorId }));
+        ws.send(JSON.stringify({ type: 'customize', color: selectedColorId, trail: selectedTrailId }));
       }
     });
 
     inventoryColorsContainer.appendChild(btn);
   });
-
-  updatePreview(selectedColorId);
 }
 
-function updateInventoryActiveBtn() {
-  const buttons = inventoryColorsContainer?.querySelectorAll('.color-option');
-  buttons?.forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.colorId === selectedColorId);
+function initBallTrailsUI() {
+  if (!inventoryTrailsContainer) return;
+  inventoryTrailsContainer.innerHTML = '';
+
+  BALL_TRAILS.forEach((trail) => {
+    const btn = document.createElement('button');
+    btn.className = `trail-option ${trail.id === selectedTrailId ? 'active' : ''}`;
+    btn.dataset.trailId = trail.id;
+    btn.title = trail.desc || trail.name;
+    btn.setAttribute('aria-label', trail.name);
+
+    const badge = document.createElement('span');
+    badge.className = 'trail-badge';
+    if (trail.color === 'rainbow') {
+      badge.style.background = 'linear-gradient(45deg, #FF0055, #FFEE00, #00FF66, #00F0FF)';
+    } else if (trail.color) {
+      badge.style.backgroundColor = trail.color;
+    } else {
+      badge.className += ' swatch-default';
+    }
+
+    const label = document.createElement('span');
+    label.className = 'trail-label';
+    label.textContent = trail.name;
+
+    btn.appendChild(badge);
+    btn.appendChild(label);
+
+    btn.addEventListener('mouseenter', () => {
+      currentPreviewTrailId = trail.id;
+      if (activeInvTab === 'trail') updatePreview(trail.id);
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      currentPreviewTrailId = selectedTrailId;
+      if (activeInvTab === 'trail') updatePreview(selectedTrailId);
+    });
+
+    btn.addEventListener('click', () => {
+      selectedTrailId = trail.id;
+      currentPreviewTrailId = selectedTrailId;
+      localStorage.setItem('pong-ball-trail', selectedTrailId);
+      updateInventoryActiveBtn();
+      updatePreview(selectedTrailId);
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'customize', color: selectedColorId, trail: selectedTrailId }));
+      }
+    });
+
+    inventoryTrailsContainer.appendChild(btn);
   });
 }
 
-function updatePreview(colorId) {
-  const color = getColorObj(colorId);
-  if (previewColorName) {
-    previewColorName.textContent = color.name;
-  }
-  if (previewPaddle) {
-    const isLight = document.body.classList.contains('light-mode');
-    const fg = isLight ? '#000000' : '#FFFFFF';
-    previewPaddle.style.backgroundColor = color.hex || fg;
+function updateInventoryActiveBtn() {
+  const colorBtns = inventoryColorsContainer?.querySelectorAll('.color-option');
+  colorBtns?.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.colorId === selectedColorId);
+  });
+
+  const trailBtns = inventoryTrailsContainer?.querySelectorAll('.trail-option');
+  trailBtns?.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.trailId === selectedTrailId);
+  });
+}
+
+function updatePreview(itemId) {
+  const isLight = document.body.classList.contains('light-mode');
+  const fg = isLight ? '#000000' : '#FFFFFF';
+
+  if (activeInvTab === 'paddle') {
+    const color = getColorObj(itemId);
+    if (previewColorName) {
+      previewColorName.textContent = color.name;
+    }
+    if (previewPaddle) {
+      previewPaddle.style.backgroundColor = color.hex || fg;
+    }
+  } else {
+    const trail = getTrailObj(itemId);
+    if (previewColorName) {
+      previewColorName.textContent = trail.name;
+    }
+    if (previewPaddle) {
+      const currentColor = getColorObj(selectedColorId);
+      previewPaddle.style.backgroundColor = currentColor.hex || fg;
+    }
   }
 }
 
@@ -265,9 +497,7 @@ function connect(address) {
 
   ws.onopen = () => {
     console.log('Connected to Pong server at', wsUrl);
-    if (selectedColorId && selectedColorId !== 'default') {
-      ws.send(JSON.stringify({ type: 'customize', color: selectedColorId }));
-    }
+    ws.send(JSON.stringify({ type: 'customize', color: selectedColorId, trail: selectedTrailId }));
   };
 
   ws.onmessage = (event) => {
@@ -306,6 +536,13 @@ function handleServerMessage(msg) {
         const oppRole = myRole === 'player1' ? 'player2' : 'player1';
         opponentColorId = msg.colors[oppRole] || null;
       }
+      if (msg.trails) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentTrailId = msg.trails[oppRole] || null;
+      } else if (msg.colors?.trails_player1 || msg.colors?.trails_player2) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentTrailId = oppRole === 'player1' ? msg.colors.trails_player1 : msg.colors.trails_player2;
+      }
       if (myRole === 'player1') {
         showScreen(screenWaiting);
       }
@@ -319,7 +556,15 @@ function handleServerMessage(msg) {
         const oppRole = myRole === 'player1' ? 'player2' : 'player1';
         opponentColorId = msg.colors[oppRole] || null;
       }
+      if (msg.trails) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentTrailId = msg.trails[oppRole] || null;
+      } else if (msg.colors?.trails_player1 || msg.colors?.trails_player2) {
+        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
+        opponentTrailId = oppRole === 'player1' ? msg.colors.trails_player1 : msg.colors.trails_player2;
+      }
       latestState = msg.state;
+      trailHistory.length = 0;
       finalScore.textContent = '0 - 0';
       showScreen(screenCountdown);
       container.classList.add('in-game');
@@ -327,7 +572,8 @@ function handleServerMessage(msg) {
 
     case 'player_custom':
       if (msg.role && msg.role !== myRole) {
-        opponentColorId = msg.color;
+        if (msg.color !== undefined) opponentColorId = msg.color;
+        if (msg.trail !== undefined) opponentTrailId = msg.trail;
       }
       break;
 
@@ -527,19 +773,50 @@ function render() {
       ctx.fillRect(p2X_screen - paddleW / 2, p2Y_screen, paddleW, paddleH);
     }
 
-    // Ball (theme square)
-    ctx.fillStyle = fgColor;
+    // Ball & Trail
     const ballW = CONFIG.BALL_SIZE * W;
     const ballH = CONFIG.BALL_SIZE * CONFIG.COURT_ASPECT_RATIO * H;
     const ballScreenX = toScreenX(latestState.ball.x);
     const ballScreenY = toScreenY(latestState.ball.y);
+    const ballActualX = myRole === 'player1' ? ballScreenX - ballW : ballScreenX;
+    const ballActualY = myRole === 'player1' ? ballScreenY - ballH : ballScreenY;
+    const ballCenterX = ballActualX + ballW / 2;
+    const ballCenterY = ballActualY + ballH / 2;
 
-    if (myRole === 'player1') {
-      // Offset by ball dimension when inverted
-      ctx.fillRect(ballScreenX - ballW, ballScreenY - ballH, ballW, ballH);
-    } else {
-      ctx.fillRect(ballScreenX, ballScreenY, ballW, ballH);
+    // Trail based on who hit the ball last
+    let activeTrailId = 'classic';
+    if (latestState.lastHitter === 'player1') {
+      activeTrailId = myRole === 'player1' ? selectedTrailId : opponentTrailId;
+    } else if (latestState.lastHitter === 'player2') {
+      activeTrailId = myRole === 'player2' ? selectedTrailId : opponentTrailId;
     }
+
+    if (latestState.phase === 'playing') {
+      trailHistory.push({
+        x: ballCenterX,
+        y: ballCenterY,
+        w: ballW,
+        h: ballH,
+        trailId: activeTrailId || 'classic',
+        time: performance.now(),
+      });
+      if (trailHistory.length > MAX_TRAIL_LENGTH) {
+        trailHistory.shift();
+      }
+    } else {
+      trailHistory.length = 0;
+    }
+
+    // Render ball trail
+    for (let i = 0; i < trailHistory.length; i++) {
+      const p = trailHistory[i];
+      const alpha = (i + 1) / trailHistory.length;
+      drawTrailSegment(ctx, p, alpha, fgColor);
+    }
+
+    // Ball (theme square)
+    ctx.fillStyle = fgColor;
+    ctx.fillRect(ballActualX, ballActualY, ballW, ballH);
   }
 }
 

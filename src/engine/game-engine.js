@@ -28,6 +28,7 @@ export class GameEngine {
       },
     };
     this.lastScorer = null;
+    this.state.lastHitter = null;
   }
 
   get ballHeight() {
@@ -65,6 +66,7 @@ export class GameEngine {
     this.state.ball.vx = 0;
     this.state.ball.vy = 0;
     this.state.ball.speed = currentSpeed;
+    this.state.lastHitter = null;
   }
 
   launchBall() {
@@ -132,6 +134,7 @@ export class GameEngine {
       ballCenterX <= paddles.player1 + paddleW / 2
     ) {
       ball.y = topPaddleBottom;
+      this.state.lastHitter = 'player1';
       this.handlePaddleBounce(paddles.player1, 1);
     }
 
@@ -145,6 +148,7 @@ export class GameEngine {
       ballCenterX <= paddles.player2 + paddleW / 2
     ) {
       ball.y = botPaddleY - ballH;
+      this.state.lastHitter = 'player2';
       this.handlePaddleBounce(paddles.player2, -1);
     }
 
@@ -213,6 +217,7 @@ export class GameEngine {
       countdownTimerRaw: this.state.countdownTimer,
       score: { ...this.state.score },
       winner: this.state.winner,
+      lastHitter: this.state.lastHitter || null,
       ball: {
         x: this.state.ball.x,
         y: this.state.ball.y,

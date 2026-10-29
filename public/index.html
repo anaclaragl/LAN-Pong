@@ -83,20 +83,29 @@
       <!-- Screen 6: Inventory -->
       <div id="screen-inventory" class="screen">
         <h2 class="screen-title">INVENTORY</h2>
-        <p class="subtitle" style="margin-bottom: 20px;">CUSTOMIZE PADDLE</p>
+
+        <!-- Customization Tabs: Paddle vs Ball Trail -->
+        <div class="inventory-tabs">
+          <button id="tab-paddle" class="inv-tab-btn active">PADDLE</button>
+          <button id="tab-trail" class="inv-tab-btn">BALL TRAIL</button>
+        </div>
 
         <!-- Preview Box -->
         <div class="inventory-preview-box">
-          <div class="preview-court">
+          <div class="preview-court" id="preview-court">
             <div id="preview-paddle" class="preview-paddle"></div>
+            <canvas id="preview-trail-canvas" class="preview-trail-canvas"></canvas>
           </div>
-          <span id="preview-color-name" class="preview-color-name">CLASSIC</span>
+          <span id="preview-item-name" class="preview-color-name">CLASSIC</span>
         </div>
 
         <!-- Color Palette Grid -->
         <div class="inventory-grid" id="inventory-colors"></div>
 
-        <button id="btn-cancel-inventory" class="btn" style="margin-top: 24px;">BACK</button>
+        <!-- Ball Trail Selection Grid -->
+        <div class="inventory-grid" id="inventory-trails" style="display: none;"></div>
+
+        <button id="btn-cancel-inventory" class="btn" style="margin-top: 20px;">BACK</button>
       </div>
 
       <!-- Notification / Error Box -->

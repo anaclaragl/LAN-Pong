@@ -187,7 +187,9 @@ export class PongServer {
             state: this.engine.getSnapshot(),
             colors: {
               player1: this.clients.player1?.customColor || null,
+              trails_player1: this.clients.player1?.customTrail || null,
               player2: this.clients.player2?.customColor || null,
+              trails_player2: this.clients.player2?.customTrail || null,
             },
           })
         );
@@ -206,6 +208,21 @@ export class PongServer {
       case 'customize': {
         if (typeof message.color === 'string') {
           ws.customColor = message.color;
+        }
+        if (typeof message.trail === 'string') {
+          ws.customTrail = message.trail;
+        }
+        if (ws.customColor || ws.customTrail) {
+          this.broadcast({
+            type: 'player_custom',
+            role: ws.role,
+            color: ws.customColor || null,
+            trail: ws.customTrail || null,
+          });
+          break;
+        }
+        if (false) {
+
           this.broadcast({
             type: 'player_custom',
             role: ws.role,
@@ -264,7 +281,9 @@ export class PongServer {
           state: this.engine.getSnapshot(),
             colors: {
               player1: this.clients.player1?.customColor || null,
+              trails_player1: this.clients.player1?.customTrail || null,
               player2: this.clients.player2?.customColor || null,
+              trails_player2: this.clients.player2?.customTrail || null,
             },
         })
       );
@@ -279,7 +298,9 @@ export class PongServer {
           state: this.engine.getSnapshot(),
             colors: {
               player1: this.clients.player1?.customColor || null,
+              trails_player1: this.clients.player1?.customTrail || null,
               player2: this.clients.player2?.customColor || null,
+              trails_player2: this.clients.player2?.customTrail || null,
             },
         })
       );
