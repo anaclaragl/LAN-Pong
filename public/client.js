@@ -428,12 +428,18 @@ function showScreen(screen) {
 
   // Update mouse cursor visibility
   container.classList.remove('in-game', 'connect4-active');
+  document.body.classList.remove('in-game', 'connect4-active');
   if (!screen) {
     if (activeGameId === 'pong') {
       container.classList.add('in-game');
+      document.body.classList.add('in-game');
     } else if (activeGameId === 'connect4') {
       container.classList.add('connect4-active');
+      document.body.classList.add('connect4-active');
     }
+  } else if (screen === screenCountdown && activeGameId === 'pong') {
+    container.classList.add('in-game');
+    document.body.classList.add('in-game');
   }
 
   if (themeToggleBtn) {
@@ -498,11 +504,11 @@ function toScreenY(canonicalY) {
   return canonicalY * rect.height;
 }
 
-// Mouse movement listener
-container.addEventListener('mousemove', (event) => {
+// Mouse and touch movement listener
+function handlePointerMovement(clientX, clientY) {
   const rect = container.getBoundingClientRect();
-  const mouseX = event.clientX - rect.left;
-  const mouseY = event.clientY - rect.top;
+  const mouseX = clientX - rect.left;
+  const mouseY = clientY - rect.top;
 
   if (activeGameId === 'connect4') {
     const col = connect4Renderer.getColumnFromMouse(mouseX, mouseY, rect.width, rect.height);
@@ -511,10 +517,13 @@ container.addEventListener('mousemove', (event) => {
   }
 
   if (activeGameId === 'pong') {
+    // Map mouse across the entire window/screen so the user has the whole screen to move the cursor
+    const screenWidth = window.innerWidth || rect.width || 1;
+    const mouseScreenX = Math.max(0, Math.min(screenWidth, clientX));
+    const normalizedScreenX = mouseScreenX / screenWidth;
+
     if (isOfflineMode) {
       if (!localEngine || (latestState?.phase !== 'playing' && latestState?.phase !== 'countdown')) return;
-      const mouseScreenX = Math.max(0, Math.min(rect.width, mouseX));
-      const normalizedScreenX = mouseScreenX / rect.width;
       localEngine.setPaddlePosition('player2', normalizedScreenX);
       return;
     }
@@ -522,8 +531,6 @@ container.addEventListener('mousemove', (event) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (!latestState || (latestState.phase !== 'playing' && latestState.phase !== 'countdown')) return;
 
-    const mouseScreenX = Math.max(0, Math.min(rect.width, mouseX));
-    const normalizedScreenX = mouseScreenX / rect.width;
     const canonicalX = myRole === 'player1' ? 1.0 - normalizedScreenX : normalizedScreenX;
 
     const now = performance.now();
@@ -535,7 +542,17 @@ container.addEventListener('mousemove', (event) => {
       }
     }
   }
+}
+
+window.addEventListener('mousemove', (event) => {
+  handlePointerMovement(event.clientX, event.clientY);
 });
+
+window.addEventListener('touchmove', (event) => {
+  if (event.touches.length > 0) {
+    handlePointerMovement(event.touches[0].clientX, event.touches[0].clientY);
+  }
+}, { passive: true });
 
 // Click listener for Connect 4 piece drop
 container.addEventListener('click', (event) => {
@@ -685,6 +702,7 @@ function startOfflineMatch() {
 
   showScreen(screenCountdown);
   container.classList.add('in-game');
+  document.body.classList.add('in-game');
 
   if (offlineInterval) {
     clearInterval(offlineInterval);
@@ -720,6 +738,8 @@ function startOfflineMatch() {
 function stopOfflineMode() {
   isOfflineMode = false;
   activeGameId = null;
+  container.classList.remove('in-game', 'connect4-active');
+  document.body.classList.remove('in-game', 'connect4-active');
   if (offlineInterval) {
     clearInterval(offlineInterval);
     offlineInterval = null;
@@ -827,9 +847,11 @@ function handleServerMessage(msg) {
         finalScore.textContent = '0 - 0';
         showScreen(screenCountdown);
         container.classList.add('in-game');
+        document.body.classList.add('in-game');
       } else if (activeGameId === 'connect4') {
         showScreen(null);
         container.classList.add('connect4-active');
+        document.body.classList.add('connect4-active');
       }
       break;
 
@@ -841,6 +863,7 @@ function handleServerMessage(msg) {
       finalScore.textContent = '0 - 0';
       showScreen(screenCountdown);
       container.classList.add('in-game');
+      document.body.classList.add('in-game');
       break;
 
     case 'state':
@@ -881,9 +904,11 @@ function updateGameState() {
       showScreen(screenCountdown);
       countdownNumber.textContent = latestState.countdownTimer;
       container.classList.add('in-game');
+      document.body.classList.add('in-game');
     } else if (latestState.phase === 'playing') {
       showScreen(null);
       container.classList.add('in-game');
+      document.body.classList.add('in-game');
     } else if (latestState.phase === 'ended') {
       handleMatchEnd(latestState);
     }
@@ -891,6 +916,7 @@ function updateGameState() {
     if (latestState.status === 'playing') {
       showScreen(null);
       container.classList.add('connect4-active');
+      document.body.classList.add('connect4-active');
     }
   }
 }

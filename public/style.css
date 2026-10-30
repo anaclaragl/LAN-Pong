@@ -49,12 +49,15 @@ body.light-mode {
   align-items: center;
 }
 
-#game-container.in-game {
-  cursor: none;
+#game-container.in-game,
+body.in-game,
+body.in-game * {
+  cursor: none !important;
 }
 
 /* Connect 4 needs pointer cursor for clicking columns */
-#game-container.connect4-active {
+#game-container.connect4-active,
+body.connect4-active {
   cursor: pointer !important;
 }
 
@@ -84,7 +87,8 @@ body.light-mode {
 }
 
 .theme-toggle.hidden,
-#game-container.in-game .theme-toggle {
+#game-container.in-game .theme-toggle,
+body.in-game .theme-toggle {
   display: none !important;
 }
 
