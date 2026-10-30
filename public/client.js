@@ -1,6 +1,8 @@
 import { CONFIG } from './config.js';
+import { GAME_REGISTRY } from '/src/shared/registry.js';
 import { GameEngine } from '/src/engine/game-engine.js';
 import { PongBot } from '/src/ai/bot.js';
+import { Connect4Renderer } from '/src/games/connect4/renderer.js';
 
 // DOM elements
 const container = document.getElementById('game-container');
@@ -10,6 +12,7 @@ const ctx = canvas.getContext('2d');
 const screenMenu = document.getElementById('screen-menu');
 const screenWaiting = document.getElementById('screen-waiting');
 const screenJoin = document.getElementById('screen-join');
+const screenLobby = document.getElementById('screen-lobby');
 const screenInventory = document.getElementById('screen-inventory');
 const screenCountdown = document.getElementById('screen-countdown');
 const screenGameOver = document.getElementById('screen-gameover');
@@ -20,6 +23,12 @@ const winnerBanner = document.getElementById('winner-banner');
 const finalScore = document.getElementById('final-score');
 const messageTitle = document.getElementById('message-title');
 const messageText = document.getElementById('message-text');
+
+const lobbyGamesGrid = document.getElementById('lobby-games-grid');
+const lobbyStatusText = document.getElementById('lobby-status-text');
+const lobbyCountdownBox = document.getElementById('lobby-countdown-box');
+const lobbyCountdownVal = document.getElementById('lobby-countdown-val');
+const btnLeaveLobby = document.getElementById('btn-leave-lobby');
 
 const btnVsBot = document.getElementById('btn-vs-bot');
 const btnCreate = document.getElementById('btn-create');
@@ -48,17 +57,25 @@ const infoIp = document.getElementById('info-ip');
 
 // State
 let ws = null;
-let myRole = null; // 'player1' (Host, top) | 'player2' (Guest, bottom)
+let myRole = null; // 'player1' (Host) | 'player2' (Guest)
+let activeGameId = null; // 'pong' | 'connect4' | null
 let latestState = null;
 let lastSentPaddleX = null;
 let lastPaddleSendTime = 0;
 let hostInfo = null;
+
+// Lobby State
+let currentVotes = { host: null, guest: null };
+let myVote = null;
 
 // Offline Mode State
 let isOfflineMode = false;
 let localEngine = null;
 let mlBot = null;
 let offlineInterval = null;
+
+// Connect 4 Client Renderer
+const connect4Renderer = new Connect4Renderer(container, canvas, ctx);
 
 // Inventory & Customization State
 const PADDLE_COLORS = [
@@ -87,9 +104,9 @@ let selectedColorId = localStorage.getItem('pong-paddle-color') || 'default';
 let selectedTrailId = localStorage.getItem('pong-ball-trail') || 'classic';
 let opponentColorId = null;
 let opponentTrailId = null;
-let activeInvTab = 'paddle'; // 'paddle' | 'trail'
+let activeInvTab = 'paddle';
 
-// Trail buffer for active match
+// Trail buffer for Pong match
 const trailHistory = [];
 const MAX_TRAIL_LENGTH = 16;
 
@@ -106,7 +123,7 @@ function resolveColorHex(colorId, fallbackHex) {
   return c.hex || fallbackHex;
 }
 
-// Draw a single trail segment for either court or preview canvas
+// Draw trail segment
 function drawTrailSegment(targetCtx, p, alpha, fgColor) {
   const trailId = p.trailId || 'classic';
   const size = p.w * (0.35 + 0.65 * alpha);
@@ -194,7 +211,6 @@ function runPreviewTrailAnimation() {
 
       pCtx.clearRect(0, 0, W, H);
 
-      // Only draw mini ball trail if inventory screen is active
       if (screenInventory?.classList.contains('active')) {
         previewBallX += previewBallVx;
         previewBallY += previewBallVy;
@@ -220,7 +236,6 @@ function runPreviewTrailAnimation() {
           drawTrailSegment(pCtx, p, alpha, fg);
         }
 
-        // Draw preview ball
         pCtx.fillStyle = fg;
         pCtx.fillRect(previewBallX - 4, previewBallY - 4, 8, 8);
       }
@@ -230,7 +245,7 @@ function runPreviewTrailAnimation() {
   requestAnimationFrame(runPreviewTrailAnimation);
 }
 
-// Inventory management
+// Inventory UI
 function initInventory() {
   initPaddleColorsUI();
   initBallTrailsUI();
@@ -395,7 +410,16 @@ function updatePreview(itemId) {
 
 // Screen management
 function showScreen(screen) {
-  [screenMenu, screenWaiting, screenJoin, screenInventory, screenCountdown, screenGameOver, screenMessage].forEach((s) => {
+  [
+    screenMenu,
+    screenWaiting,
+    screenJoin,
+    screenLobby,
+    screenInventory,
+    screenCountdown,
+    screenGameOver,
+    screenMessage,
+  ].forEach((s) => {
     s?.classList.remove('active');
   });
   if (screen) {
@@ -403,15 +427,22 @@ function showScreen(screen) {
   }
 
   // Update mouse cursor visibility
-  if (!screen && (latestState?.phase === 'playing' || latestState?.phase === 'countdown')) {
-    container.classList.add('in-game');
-  } else {
-    container.classList.remove('in-game');
+  container.classList.remove('in-game', 'connect4-active');
+  if (!screen) {
+    if (activeGameId === 'pong') {
+      container.classList.add('in-game');
+    } else if (activeGameId === 'connect4') {
+      container.classList.add('connect4-active');
+    }
   }
 
-  // Toggle button visibility: show only on Start Menu, Waiting for Opponent, Join Match, and Inventory
   if (themeToggleBtn) {
-    const isAllowedScreen = screen === screenMenu || screen === screenWaiting || screen === screenJoin || screen === screenInventory;
+    const isAllowedScreen =
+      screen === screenMenu ||
+      screen === screenWaiting ||
+      screen === screenJoin ||
+      screen === screenLobby ||
+      screen === screenInventory;
     themeToggleBtn.classList.toggle('hidden', !isAllowedScreen);
   }
 }
@@ -433,7 +464,6 @@ async function fetchHostInfo() {
       }
     }
   } catch (e) {
-    // If not running directly from host server, fallback to current window location
     hostAddressInput.value = window.location.host || 'localhost:8080';
   }
 }
@@ -451,7 +481,7 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Coordinate transformation helpers
+// Coordinate transformation helpers for Pong
 function toScreenX(canonicalX) {
   const rect = container.getBoundingClientRect();
   if (myRole === 'player1') {
@@ -468,41 +498,170 @@ function toScreenY(canonicalY) {
   return canonicalY * rect.height;
 }
 
-// Mouse input handler
+// Mouse movement listener
 container.addEventListener('mousemove', (event) => {
-  if (isOfflineMode) {
-    if (!localEngine || (latestState?.phase !== 'playing' && latestState?.phase !== 'countdown')) return;
-    const rect = container.getBoundingClientRect();
-    const mouseScreenX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-    const normalizedScreenX = mouseScreenX / rect.width;
-    localEngine.setPaddlePosition('player2', normalizedScreenX);
+  const rect = container.getBoundingClientRect();
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+
+  if (activeGameId === 'connect4') {
+    const col = connect4Renderer.getColumnFromMouse(mouseX, mouseY, rect.width, rect.height);
+    connect4Renderer.setHoverColumn(col);
     return;
   }
 
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (!latestState || (latestState.phase !== 'playing' && latestState.phase !== 'countdown')) return;
+  if (activeGameId === 'pong') {
+    if (isOfflineMode) {
+      if (!localEngine || (latestState?.phase !== 'playing' && latestState?.phase !== 'countdown')) return;
+      const mouseScreenX = Math.max(0, Math.min(rect.width, mouseX));
+      const normalizedScreenX = mouseScreenX / rect.width;
+      localEngine.setPaddlePosition('player2', normalizedScreenX);
+      return;
+    }
 
-  const rect = container.getBoundingClientRect();
-  const mouseScreenX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-  const normalizedScreenX = mouseScreenX / rect.width;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!latestState || (latestState.phase !== 'playing' && latestState.phase !== 'countdown')) return;
 
-  // Convert to canonical X
-  // For Host (Player 1, 180° rotated): canonicalX = 1 - normalizedScreenX
-  // For Guest (Player 2, direct): canonicalX = normalizedScreenX
-  const canonicalX = myRole === 'player1' ? 1.0 - normalizedScreenX : normalizedScreenX;
+    const mouseScreenX = Math.max(0, Math.min(rect.width, mouseX));
+    const normalizedScreenX = mouseScreenX / rect.width;
+    const canonicalX = myRole === 'player1' ? 1.0 - normalizedScreenX : normalizedScreenX;
 
-  // Throttle sends to ~60Hz
-  const now = performance.now();
-  if (now - lastPaddleSendTime >= 16 || lastSentPaddleX === null) {
-    if (Math.abs(canonicalX - (lastSentPaddleX || 0)) > 0.001) {
-      ws.send(JSON.stringify({ type: 'paddle', x: canonicalX }));
-      lastSentPaddleX = canonicalX;
-      lastPaddleSendTime = now;
+    const now = performance.now();
+    if (now - lastPaddleSendTime >= 16 || lastSentPaddleX === null) {
+      if (Math.abs(canonicalX - (lastSentPaddleX || 0)) > 0.001) {
+        ws.send(JSON.stringify({ type: 'paddle', x: canonicalX }));
+        lastSentPaddleX = canonicalX;
+        lastPaddleSendTime = now;
+      }
     }
   }
 });
 
-// Offline ML Bot Match Management
+// Click listener for Connect 4 piece drop
+container.addEventListener('click', (event) => {
+  if (activeGameId !== 'connect4') return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!latestState || latestState.status !== 'playing') return;
+  if (latestState.currentPlayer !== myRole) return;
+
+  const rect = container.getBoundingClientRect();
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+  const col = connect4Renderer.getColumnFromMouse(mouseX, mouseY, rect.width, rect.height);
+
+  if (col !== null) {
+    ws.send(JSON.stringify({ type: 'move', column: col }));
+  }
+});
+
+// -------------------------------------------------------------
+// Lobby & Voting System
+// -------------------------------------------------------------
+function buildLobbyUI() {
+  if (!lobbyGamesGrid) return;
+  lobbyGamesGrid.innerHTML = '';
+
+  GAME_REGISTRY.forEach((game) => {
+    const card = document.createElement('div');
+    card.className = 'game-card';
+    card.dataset.gameId = game.id;
+
+    // Title & description
+    const title = document.createElement('div');
+    title.className = 'game-card-title';
+    title.textContent = game.title;
+
+    const desc = document.createElement('div');
+    desc.className = 'game-card-desc';
+    desc.textContent = game.description;
+
+    // Vote indicator container
+    const indicators = document.createElement('div');
+    indicators.className = 'vote-indicators';
+    indicators.id = `indicators-${game.id}`;
+
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(indicators);
+
+    // Click handler to toggle vote
+    card.addEventListener('click', () => {
+      sendVote(game.id);
+    });
+
+    lobbyGamesGrid.appendChild(card);
+  });
+
+  updateLobbyVoteDisplay();
+}
+
+function sendVote(gameId) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // If clicking already voted card, send null to remove vote
+  const nextVote = myVote === gameId ? null : gameId;
+  myVote = nextVote;
+  ws.send(JSON.stringify({ type: 'vote', gameId: nextVote }));
+}
+
+function updateLobbyVoteDisplay(countdown = null, selectedGame = null) {
+  // Clear all badges
+  document.querySelectorAll('.vote-indicators').forEach((el) => {
+    el.innerHTML = '';
+  });
+  document.querySelectorAll('.game-card').forEach((card) => {
+    card.classList.remove('my-vote');
+  });
+
+  // Host vote (circle with 1)
+  if (currentVotes.host) {
+    const hostContainer = document.getElementById(`indicators-${currentVotes.host}`);
+    if (hostContainer) {
+      const b1 = document.createElement('div');
+      b1.className = 'vote-badge';
+      b1.textContent = '1';
+      b1.title = 'Host (Player 1)';
+      hostContainer.appendChild(b1);
+    }
+  }
+
+  // Guest vote (circle with 2)
+  if (currentVotes.guest) {
+    const guestContainer = document.getElementById(`indicators-${currentVotes.guest}`);
+    if (guestContainer) {
+      const b2 = document.createElement('div');
+      b2.className = 'vote-badge';
+      b2.textContent = '2';
+      b2.title = 'Guest (Player 2)';
+      guestContainer.appendChild(b2);
+    }
+  }
+
+  // Highlight my voted card
+  if (myVote) {
+    const myCard = document.querySelector(`.game-card[data-game-id="${myVote}"]`);
+    myCard?.classList.add('my-vote');
+  }
+
+  // Countdown banner
+  if (countdown !== null && countdown > 0) {
+    lobbyCountdownBox.style.display = 'block';
+    lobbyCountdownVal.textContent = countdown;
+    lobbyStatusText.textContent = `Both voted for ${selectedGame?.toUpperCase()}!`;
+  } else {
+    lobbyCountdownBox.style.display = 'none';
+    if (currentVotes.host && currentVotes.guest && currentVotes.host !== currentVotes.guest) {
+      lobbyStatusText.textContent = 'Votes differ! Agree on a game to start.';
+    } else if (currentVotes.host || currentVotes.guest) {
+      lobbyStatusText.textContent = 'Waiting for other player to vote...';
+    } else {
+      lobbyStatusText.textContent = 'Click a card to vote. Both must agree!';
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// Offline Mode (Pong vs Bot)
+// -------------------------------------------------------------
 function startOfflineMatch() {
   if (ws) {
     ws.close();
@@ -510,7 +669,8 @@ function startOfflineMatch() {
   }
 
   isOfflineMode = true;
-  myRole = 'player2'; // Human plays at bottom, Bot plays at top as player1
+  activeGameId = 'pong';
+  myRole = 'player2';
   opponentColorId = 'cyan';
   opponentTrailId = 'matrix';
 
@@ -536,11 +696,9 @@ function startOfflineMatch() {
   offlineInterval = setInterval(() => {
     if (!isOfflineMode || !localEngine) return;
 
-    // 1. Bot computes paddle movement
     const botX = mlBot.update(localEngine.getSnapshot(), dt);
     localEngine.setPaddlePosition('player1', botX);
 
-    // 2. Physics tick
     const evt = localEngine.tick(dt);
     latestState = localEngine.getSnapshot();
 
@@ -561,6 +719,7 @@ function startOfflineMatch() {
 
 function stopOfflineMode() {
   isOfflineMode = false;
+  activeGameId = null;
   if (offlineInterval) {
     clearInterval(offlineInterval);
     offlineInterval = null;
@@ -571,7 +730,9 @@ function stopOfflineMode() {
   showScreen(screenMenu);
 }
 
-// WebSocket connection
+// -------------------------------------------------------------
+// WebSocket Connection & Protocol
+// -------------------------------------------------------------
 function connect(address) {
   if (isOfflineMode) {
     stopOfflineMode();
@@ -601,6 +762,7 @@ function connect(address) {
   };
 
   ws.onclose = (event) => {
+    activeGameId = null;
     if (event.reason === 'Match full') {
       messageTitle.textContent = 'MATCH FULL';
       messageText.textContent = 'A 2-player match is already in progress on this host.';
@@ -625,38 +787,55 @@ function handleServerMessage(msg) {
   switch (msg.type) {
     case 'assigned':
       myRole = msg.role;
-      latestState = msg.state;
       if (msg.colors) {
         const oppRole = myRole === 'player1' ? 'player2' : 'player1';
         opponentColorId = msg.colors[oppRole] || null;
-      }
-      if (msg.trails) {
-        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
-        opponentTrailId = msg.trails[oppRole] || null;
-      } else if (msg.colors?.trails_player1 || msg.colors?.trails_player2) {
-        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
-        opponentTrailId = oppRole === 'player1' ? msg.colors.trails_player1 : msg.colors.trails_player2;
       }
       if (myRole === 'player1') {
         showScreen(screenWaiting);
       }
       break;
 
-    case 'start':
-      if (msg.role) {
-        myRole = msg.role;
-      }
+    case 'lobby':
+      activeGameId = null;
+      latestState = null;
       if (msg.colors) {
         const oppRole = myRole === 'player1' ? 'player2' : 'player1';
         opponentColorId = msg.colors[oppRole] || null;
       }
-      if (msg.trails) {
+      currentVotes = msg.votes || { host: null, guest: null };
+      myVote = myRole === 'player1' ? currentVotes.host : currentVotes.guest;
+      buildLobbyUI();
+      showScreen(screenLobby);
+      break;
+
+    case 'votes':
+      currentVotes = { host: msg.host, guest: msg.guest };
+      myVote = myRole === 'player1' ? currentVotes.host : currentVotes.guest;
+      updateLobbyVoteDisplay(msg.countdown, msg.selectedGame);
+      break;
+
+    case 'game_start':
+      activeGameId = msg.gameId;
+      latestState = msg.state || null;
+      if (msg.colors) {
         const oppRole = myRole === 'player1' ? 'player2' : 'player1';
-        opponentTrailId = msg.trails[oppRole] || null;
-      } else if (msg.colors?.trails_player1 || msg.colors?.trails_player2) {
-        const oppRole = myRole === 'player1' ? 'player2' : 'player1';
-        opponentTrailId = oppRole === 'player1' ? msg.colors.trails_player1 : msg.colors.trails_player2;
+        opponentColorId = msg.colors[oppRole] || null;
       }
+      if (activeGameId === 'pong') {
+        trailHistory.length = 0;
+        finalScore.textContent = '0 - 0';
+        showScreen(screenCountdown);
+        container.classList.add('in-game');
+      } else if (activeGameId === 'connect4') {
+        showScreen(null);
+        container.classList.add('connect4-active');
+      }
+      break;
+
+    case 'start': // Legacy & Pong start message
+      activeGameId = 'pong';
+      if (msg.role) myRole = msg.role;
       latestState = msg.state;
       trailHistory.length = 0;
       finalScore.textContent = '0 - 0';
@@ -664,15 +843,8 @@ function handleServerMessage(msg) {
       container.classList.add('in-game');
       break;
 
-    case 'player_custom':
-      if (msg.role && msg.role !== myRole) {
-        if (msg.color !== undefined) opponentColorId = msg.color;
-        if (msg.trail !== undefined) opponentTrailId = msg.trail;
-      }
-      break;
-
     case 'state':
-      latestState = msg.state;
+      latestState = msg.state || msg;
       updateGameState();
       break;
 
@@ -682,11 +854,12 @@ function handleServerMessage(msg) {
       break;
 
     case 'end':
-      latestState = msg.state;
-      handleMatchEnd(msg.winner, msg.score);
+      latestState = msg.state || msg;
+      handleMatchEnd(msg);
       break;
 
     case 'opponent_disconnected':
+      activeGameId = null;
       messageTitle.textContent = 'MATCH PAUSED';
       messageText.textContent = 'Opponent disconnected from the match.';
       showScreen(screenMessage);
@@ -703,31 +876,63 @@ function handleServerMessage(msg) {
 function updateGameState() {
   if (!latestState) return;
 
-  if (latestState.phase === 'countdown') {
-    showScreen(screenCountdown);
-    countdownNumber.textContent = latestState.countdownTimer;
-    container.classList.add('in-game');
-  } else if (latestState.phase === 'playing') {
-    showScreen(null);
-    container.classList.add('in-game');
-  } else if (latestState.phase === 'ended') {
-    handleMatchEnd(latestState.winner, latestState.score);
+  if (activeGameId === 'pong') {
+    if (latestState.phase === 'countdown') {
+      showScreen(screenCountdown);
+      countdownNumber.textContent = latestState.countdownTimer;
+      container.classList.add('in-game');
+    } else if (latestState.phase === 'playing') {
+      showScreen(null);
+      container.classList.add('in-game');
+    } else if (latestState.phase === 'ended') {
+      handleMatchEnd(latestState);
+    }
+  } else if (activeGameId === 'connect4') {
+    if (latestState.status === 'playing') {
+      showScreen(null);
+      container.classList.add('connect4-active');
+    }
   }
 }
 
-function handleMatchEnd(winner, score) {
-  const currentScore = score || latestState?.score || { player1: 0, player2: 0 };
-  const isWinner = winner === myRole;
-  winnerBanner.textContent = isWinner ? 'YOU WON!' : 'OPPONENT WON!';
+function handleMatchEnd(msg) {
+  if (activeGameId === 'pong') {
+    const winner = msg.winner;
+    const score = msg.score || latestState?.score || { player1: 0, player2: 0 };
+    const isWinner = winner === myRole;
+    winnerBanner.textContent = isWinner ? 'YOU WON!' : 'OPPONENT WON!';
 
-  const myScore = myRole === 'player1' ? (currentScore.player1 ?? 0) : (currentScore.player2 ?? 0);
-  const oppScore = myRole === 'player1' ? (currentScore.player2 ?? 0) : (currentScore.player1 ?? 0);
-  finalScore.textContent = `${myScore} - ${oppScore}`;
+    const myScore = myRole === 'player1' ? (score.player1 ?? 0) : (score.player2 ?? 0);
+    const oppScore = myRole === 'player1' ? (score.player2 ?? 0) : (score.player1 ?? 0);
+    finalScore.textContent = `${myScore} - ${oppScore}`;
 
-  showScreen(screenGameOver);
+    showScreen(screenGameOver);
+  } else if (activeGameId === 'connect4') {
+    // Show win/draw banner on Connect 4 board, then allow returning to lobby
+    const result = msg.result || latestState?.status;
+    const winner = msg.winner || latestState?.winner;
+    const scores = msg.scores || latestState?.scores || { player1: 0, player2: 0 };
+
+    if (result === 'win') {
+      winnerBanner.textContent = winner === myRole ? 'YOU WON!' : 'OPPONENT WON!';
+    } else {
+      winnerBanner.textContent = "IT'S A DRAW!";
+    }
+
+    const myScore = myRole === 'player1' ? (scores.player1 ?? 0) : (scores.player2 ?? 0);
+    const oppScore = myRole === 'player1' ? (scores.player2 ?? 0) : (scores.player1 ?? 0);
+    finalScore.textContent = `${myScore} - ${oppScore}`;
+
+    // Give 1.5s to admire winning 4 pieces before showing game over overlay
+    setTimeout(() => {
+      showScreen(screenGameOver);
+    }, 1500);
+  }
 }
 
-// UI Button actions
+// -------------------------------------------------------------
+// UI Button Listeners
+// -------------------------------------------------------------
 if (btnVsBot) {
   btnVsBot.addEventListener('click', () => {
     startOfflineMatch();
@@ -772,10 +977,16 @@ btnConnect.addEventListener('click', () => {
   }
 });
 
+btnLeaveLobby?.addEventListener('click', () => {
+  if (ws) ws.close();
+  showScreen(screenMenu);
+});
+
 btnRematch.addEventListener('click', () => {
   if (isOfflineMode) {
     startOfflineMatch();
   } else if (ws && ws.readyState === WebSocket.OPEN) {
+    // Returns both players to lobby with cleared votes
     ws.send(JSON.stringify({ type: 'rematch' }));
   }
 });
@@ -784,9 +995,9 @@ if (btnGameoverMenu) {
   btnGameoverMenu.addEventListener('click', () => {
     if (isOfflineMode) {
       stopOfflineMode();
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'rematch' }));
     } else {
-      latestState = null;
-      if (ws) ws.close();
       showScreen(screenMenu);
     }
   });
@@ -794,21 +1005,32 @@ if (btnGameoverMenu) {
 
 btnMessageAck.addEventListener('click', () => {
   latestState = null;
+  activeGameId = null;
   if (ws) ws.close();
   showScreen(screenMenu);
 });
 
-// Escape key to leave offline match
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isOfflineMode) {
     stopOfflineMode();
   }
 });
 
-// Rendering Loop
+// -------------------------------------------------------------
+// Main Render Loop
+// -------------------------------------------------------------
 function render() {
   requestAnimationFrame(render);
 
+  if (activeGameId === 'connect4') {
+    connect4Renderer.render(latestState, myRole, {
+      player1: myRole === 'player1' ? selectedColorId : opponentColorId,
+      player2: myRole === 'player2' ? selectedColorId : opponentColorId,
+    });
+    return;
+  }
+
+  // Otherwise render Pong
   const rect = container.getBoundingClientRect();
   const W = rect.width;
   const H = rect.height;
@@ -829,10 +1051,10 @@ function render() {
   ctx.moveTo(0, H / 2);
   ctx.lineTo(W, H / 2);
   ctx.stroke();
-  ctx.setLineDash([]); // Reset line dash
+  ctx.setLineDash([]);
 
   // Scores
-  if (latestState) {
+  if (latestState && activeGameId === 'pong') {
     const p1Score = latestState.score.player1;
     const p2Score = latestState.score.player2;
 
@@ -843,30 +1065,26 @@ function render() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Opponent score (Top half)
     const oppLabel = isOfflineMode ? 'BOT' : 'OPPONENT';
     ctx.font = 'bold 12px Consolas, Courier, monospace';
     ctx.fillText(oppLabel, W / 2, H * 0.22);
     ctx.font = 'bold 44px Consolas, Courier, monospace';
     ctx.fillText(String(oppScore), W / 2, H * 0.32);
 
-    // My score (Bottom half)
     ctx.font = 'bold 44px Consolas, Courier, monospace';
     ctx.fillText(String(myScore), W / 2, H * 0.68);
     ctx.font = 'bold 12px Consolas, Courier, monospace';
     ctx.fillText('YOU', W / 2, H * 0.78);
   }
 
-  // Draw paddles and ball only when game state is active
-  if (latestState) {
+  // Draw paddles and ball only when Pong is active
+  if (latestState && activeGameId === 'pong') {
     const paddleW = CONFIG.PADDLE_WIDTH * W;
     const paddleH = CONFIG.PADDLE_HEIGHT * H;
 
-    // Paddle 1 (Host) canonical Y = 0.03
     const p1Y_screen = toScreenY(0.03);
     const p1X_screen = toScreenX(latestState.paddles.player1);
 
-    // Paddle 2 (Guest) canonical Y = 1 - 0.03 - PADDLE_HEIGHT
     const p2Y_screen = toScreenY(1.0 - 0.03 - CONFIG.PADDLE_HEIGHT);
     const p2X_screen = toScreenX(latestState.paddles.player2);
 
@@ -876,21 +1094,14 @@ function render() {
     const p1Color = myRole === 'player1' ? myPaddleColor : oppPaddleColor;
     const p2Color = myRole === 'player2' ? myPaddleColor : oppPaddleColor;
 
-    // When Host is rotated 180°, top & bottom swap visually:
-    // P1 (Host) is rendered at bottom: p1Y_screen - paddleH
-    // P2 (Guest) is rendered at top: p2Y_screen
     if (myRole === 'player1') {
-      // Host view: P1 (self) is at bottom
       ctx.fillStyle = p1Color;
       ctx.fillRect(p1X_screen - paddleW / 2, p1Y_screen - paddleH, paddleW, paddleH);
-      // P2 (opponent) is at top
       ctx.fillStyle = p2Color;
       ctx.fillRect(p2X_screen - paddleW / 2, p2Y_screen, paddleW, paddleH);
     } else {
-      // Guest view: P1 (opponent) is at top
       ctx.fillStyle = p1Color;
       ctx.fillRect(p1X_screen - paddleW / 2, p1Y_screen, paddleW, paddleH);
-      // P2 (self) is at bottom
       ctx.fillStyle = p2Color;
       ctx.fillRect(p2X_screen - paddleW / 2, p2Y_screen, paddleW, paddleH);
     }
@@ -905,7 +1116,6 @@ function render() {
     const ballCenterX = ballActualX + ballW / 2;
     const ballCenterY = ballActualY + ballH / 2;
 
-    // Trail based on who hit the ball last
     let activeTrailId = 'classic';
     if (latestState.lastHitter === 'player1') {
       activeTrailId = myRole === 'player1' ? selectedTrailId : opponentTrailId;
@@ -929,19 +1139,16 @@ function render() {
       trailHistory.length = 0;
     }
 
-    // Render ball trail
     for (let i = 0; i < trailHistory.length; i++) {
       const p = trailHistory[i];
       const alpha = (i + 1) / trailHistory.length;
       drawTrailSegment(ctx, p, alpha, fgColor);
     }
 
-    // Ball (theme square)
     ctx.fillStyle = fgColor;
     ctx.fillRect(ballActualX, ballActualY, ballW, ballH);
   }
 }
 
-// Initial setup
 fetchHostInfo();
 render();

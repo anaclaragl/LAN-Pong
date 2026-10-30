@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PONG - LAN</title>
+  <title>LOCAL GAMES</title>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -30,20 +30,20 @@
       </svg>
     </button>
 
-    <!-- Canvas for court rendering -->
+    <!-- Canvas for court / game rendering -->
     <canvas id="court"></canvas>
 
-    <!-- UI Overlay for Menus and Prompts -->
+    <!-- UI Overlay for Menus, Lobby, and Prompts -->
     <div id="ui-overlay">
       <!-- Screen 1: Start Menu -->
       <div id="screen-menu" class="screen active">
-        <h1 class="game-title">PONG</h1>
+        <h1 class="game-title">LOCAL ARCADE</h1>
         <p class="subtitle">LOCAL NETWORK (LAN)</p>
         <div class="menu-actions">
-          <button id="btn-vs-bot" class="btn">PLAY OFFLINE</button>
           <button id="btn-create" class="btn">CREATE MATCH</button>
-          <button id="btn-inventory" class="btn">INVENTORY</button>
           <button id="btn-show-join" class="btn">JOIN MATCH</button>
+          <button id="btn-vs-bot" class="btn">PLAY PONG OFFLINE</button>
+          <button id="btn-inventory" class="btn">INVENTORY</button>
         </div>
       </div>
 
@@ -69,20 +69,39 @@
         </div>
       </div>
 
-      <!-- Screen 4: Countdown HUD -->
+      <!-- Screen 4: Game Selection Lobby with Voting -->
+      <div id="screen-lobby" class="screen">
+        <h2 class="screen-title">SELECT GAME</h2>
+        <p class="lobby-subtitle">VOTE FOR A GAME TO PLAY</p>
+
+        <!-- Dynamic Game Cards Grid populated from GAME_REGISTRY -->
+        <div id="lobby-games-grid" class="lobby-grid"></div>
+
+        <!-- Voting Status & Agreement Countdown Banner -->
+        <div id="lobby-status-banner" class="lobby-banner">
+          <span id="lobby-status-text">Click a card to vote. Both must agree!</span>
+          <div id="lobby-countdown-box" class="lobby-countdown-box" style="display: none;">
+            <span>STARTING IN <strong id="lobby-countdown-val">2</strong>...</span>
+          </div>
+        </div>
+
+        <button id="btn-leave-lobby" class="btn" style="margin-top: 16px;">DISCONNECT</button>
+      </div>
+
+      <!-- Screen 5: Countdown HUD (Pong) -->
       <div id="screen-countdown" class="screen hud">
         <div id="countdown-number" class="countdown-text">3</div>
       </div>
 
-      <!-- Screen 5: Game Over -->
+      <!-- Screen 6: Game Over -->
       <div id="screen-gameover" class="screen">
         <h2 id="winner-banner" class="game-title">YOU WON!</h2>
         <p id="final-score" class="final-score-text">0 - 0</p>
         <button id="btn-rematch" class="btn">PLAY AGAIN</button>
-        <button id="btn-gameover-menu" class="btn" style="margin-top: 10px;">MAIN MENU</button>
+        <button id="btn-gameover-menu" class="btn" style="margin-top: 10px;">LOBBY</button>
       </div>
 
-      <!-- Screen 6: Inventory -->
+      <!-- Screen 7: Inventory -->
       <div id="screen-inventory" class="screen">
         <h2 class="screen-title">INVENTORY</h2>
 

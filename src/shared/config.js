@@ -23,4 +23,9 @@ export const CONFIG = {
   BOT: {
     PADDLE_SPEED: 2.2,             // natural physical movement speed (court widths/sec)
   },
+  // Connect 4 & Lobby configurations
+  CONNECT4_COLUMNS: 7,
+  CONNECT4_ROWS: 6,
+  CONNECT4_WIN_LENGTH: 4,
+  GAME_START_COUNTDOWN_SECONDS: 2,
 };

@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Bonjour } from 'bonjour-service';
 import { CONFIG } from './shared/config.js';
-import { GameEngine } from './engine/game-engine.js';
+import { GAME_REGISTRY } from './shared/registry.js';
+import { LobbyManager } from './lobby/lobby-manager.js';
+import { PongGameModule } from './games/pong/index.js';
+import { Connect4Module } from './games/connect4/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +38,7 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-export function createHttpHandler(engineProvider) {
+export function createHttpHandler(serverInstance) {
   return (req, res) => {
     let reqPath = req.url.split('?')[0];
 
@@ -63,7 +66,9 @@ export function createHttpHandler(engineProvider) {
     } else if (
       reqPath.startsWith('/src/shared/') ||
       reqPath.startsWith('/src/engine/') ||
-      reqPath.startsWith('/src/ai/')
+      reqPath.startsWith('/src/ai/') ||
+      reqPath.startsWith('/src/games/') ||
+      reqPath.startsWith('/src/lobby/')
     ) {
       filePath = path.join(rootDir, reqPath);
     } else {
@@ -101,23 +106,59 @@ export class PongServer {
   constructor(port = CONFIG.PORT, options = {}) {
     this.initialPort = port;
     this.port = port;
-    this.engine = new GameEngine();
     this.clients = {
       player1: null, // Host (WebSocket)
       player2: null, // Guest (WebSocket)
     };
     this.ipConnections = new Map();
     this.maxConnectionsPerIp = options.maxConnectionsPerIp ?? CONFIG.SECURITY?.MAX_CONNECTIONS_PER_IP ?? 2;
+
+    this.currentGameId = null;
+    this.currentGame = null;
     this.gameLoopInterval = null;
+    this._defaultEngine = new PongGameModule().engine;
+
+    // Connect 4 persistent session scores
+    this.connect4Scores = { player1: 0, player2: 0 };
+
+    this.lobby = new LobbyManager({
+      countdownSeconds: options.countdownSeconds ?? CONFIG.GAME_START_COUNTDOWN_SECONDS ?? 2,
+    });
+
+    this.lobby.onVoteChangeCallback = (data) => {
+      this.broadcast({
+        type: 'votes',
+        ...data.votes,
+        countdown: data.countdown,
+        selectedGame: data.selectedGame,
+      });
+    };
+
+    this.lobby.onGameStartCallback = (gameId) => {
+      this.launchGame(gameId);
+    };
+
     this.bonjour = null;
     this.httpServer = null;
     this.wss = null;
   }
 
+  // Backwards compatibility getter for test suite
+  get engine() {
+    if (this.currentGameId === 'pong' && this.currentGame) {
+      return this.currentGame.engine;
+    }
+    // Return a default engine if none is active
+    if (!this._defaultEngine) {
+      this._defaultEngine = new PongGameModule().engine;
+    }
+    return this._defaultEngine;
+  }
+
   async start() {
     return new Promise((resolve, reject) => {
       const tryPort = (portToTry) => {
-        const server = http.createServer(createHttpHandler(this.engine));
+        const server = http.createServer(createHttpHandler(this));
 
         server.once('error', (err) => {
           if (err.code === 'EADDRINUSE') {
@@ -210,38 +251,61 @@ export class PongServer {
         }
       });
 
-      // If both players are connected, start the match!
+      // Notify player of connection assignment and registry
+      ws.send(
+        JSON.stringify({
+          type: 'assigned',
+          role: ws.role,
+          config: CONFIG,
+          registry: GAME_REGISTRY,
+          colors: {
+            player1: this.clients.player1?.customColor || null,
+            trails_player1: this.clients.player1?.customTrail || null,
+            player2: this.clients.player2?.customColor || null,
+            trails_player2: this.clients.player2?.customTrail || null,
+          },
+        })
+      );
+
+      // If both players are connected, transition to Lobby Screen
       if (
         this.clients.player1 &&
         this.clients.player1.readyState === WebSocket.OPEN &&
         this.clients.player2 &&
         this.clients.player2.readyState === WebSocket.OPEN
       ) {
-        this.startMatch();
-      } else {
-        // Send waiting notification
-        ws.send(
-          JSON.stringify({
-            type: 'assigned',
-            role: ws.role,
-            config: CONFIG,
-            state: this.engine.getSnapshot(),
-            colors: {
-              player1: this.clients.player1?.customColor || null,
-              trails_player1: this.clients.player1?.customTrail || null,
-              player2: this.clients.player2?.customColor || null,
-              trails_player2: this.clients.player2?.customTrail || null,
-            },
-          })
-        );
+        this.enterLobby();
       }
+    });
+  }
+
+  enterLobby() {
+    if (this._defaultEngine) {
+      this._defaultEngine.state.phase = 'paused';
+    }
+    if (this.currentGame?.engine) {
+      this.currentGame.engine.state.phase = 'paused';
+    }
+
+    this.stopCurrentGame();
+    this.lobby.reset();
+
+    this.broadcast({
+      type: 'lobby',
+      registry: GAME_REGISTRY,
+      votes: this.lobby.getVotes(),
+      config: CONFIG,
+      colors: {
+        player1: this.clients.player1?.customColor || null,
+        player2: this.clients.player2?.customColor || null,
+      },
     });
   }
 
   handleClientMessage(ws, message) {
     if (!message || typeof message !== 'object') return;
 
-    // Per-connection rate limiting
+    // Rate limiting
     const nowMs = Date.now();
     const maxRate = CONFIG.SECURITY?.MAX_PADDLE_RATE_PER_SEC ?? 70;
     if (!ws.rateLimit) {
@@ -253,18 +317,23 @@ export class PongServer {
     }
     ws.rateLimit.count++;
     if (ws.rateLimit.count > maxRate) {
-      // Discard excess message silently to protect server performance
       return;
     }
 
     switch (message.type) {
+      // 1. Lobby voting message: { type: 'vote', gameId: string | null }
+      case 'vote': {
+        const gameId = message.gameId === undefined ? null : message.gameId;
+        this.lobby.setVote(ws.role, gameId);
+        break;
+      }
+
+      // 2. Pong paddle movement
       case 'paddle': {
-        // 1. Validate number, finite, within bounds [0.0, 1.0]
         if (typeof message.x !== 'number' || !Number.isFinite(message.x) || message.x < 0.0 || message.x > 1.0) {
           return;
         }
 
-        // 2. Anti-teleportation & velocity limit
         const nowPerf = performance.now();
         const minDt = CONFIG.SECURITY?.MIN_DELTA_TIME_SEC ?? 0.005;
         const maxSpeed = CONFIG.SECURITY?.MAX_PADDLE_SPEED ?? 5.0;
@@ -283,9 +352,45 @@ export class PongServer {
 
         ws.lastPaddleX = targetX;
         ws.lastPaddleTime = nowPerf;
-        this.engine.setPaddlePosition(ws.role, targetX);
+
+        if (this.currentGame && this.currentGameId === 'pong') {
+          this.currentGame.onInput(ws.role, { type: 'paddle', x: targetX });
+        } else if (this._defaultEngine) {
+          this._defaultEngine.setPaddlePosition(ws.role, targetX);
+        }
         break;
       }
+
+      // 3. Connect 4 move message: { type: 'move', column: number }
+      case 'move': {
+        if (this.currentGame && this.currentGameId === 'connect4') {
+          const res = this.currentGame.onInput(ws.role, { type: 'move', column: message.column });
+          if (res.success) {
+            const state = this.currentGame.getState();
+            this.broadcast({
+              type: 'state',
+              board: state.board,
+              currentPlayer: state.currentPlayer,
+              status: state.status,
+              winningCells: state.winningCells,
+              scores: state.scores,
+              lastMove: state.lastMove,
+            });
+
+            if (state.status === 'win' || state.status === 'draw') {
+              this.broadcast({
+                type: 'end',
+                result: state.status,
+                winner: state.winner,
+                winningCells: state.winningCells,
+                scores: state.scores,
+              });
+            }
+          }
+        }
+        break;
+      }
+
       case 'customize': {
         if (typeof message.color === 'string') {
           ws.customColor = message.color;
@@ -300,15 +405,13 @@ export class PongServer {
             color: ws.customColor || null,
             trail: ws.customTrail || null,
           });
-          break;
         }
         break;
       }
+
+      // Rematch: returns both players to lobby with cleared votes
       case 'rematch': {
-        if (this.engine.state.phase === 'ended') {
-          this.engine.resetMatch();
-          this.startMatch();
-        }
+        this.enterLobby();
         break;
       }
     }
@@ -321,12 +424,15 @@ export class PongServer {
       this.clients.player2 = null;
     }
 
-    if (this.gameLoopInterval) {
-      clearInterval(this.gameLoopInterval);
-      this.gameLoopInterval = null;
+    if (this._defaultEngine) {
+      this._defaultEngine.state.phase = 'paused';
+    }
+    if (this.currentGame?.engine) {
+      this.currentGame.engine.state.phase = 'paused';
     }
 
-    this.engine.state.phase = 'paused';
+    this.stopCurrentGame();
+    this.lobby.reset();
 
     this.broadcast({
       type: 'opponent_disconnected',
@@ -335,55 +441,82 @@ export class PongServer {
     });
   }
 
-  startMatch() {
-    this.engine.resetMatch();
-    this.engine.startCountdown(false);
+  launchGame(gameId) {
+    this.stopCurrentGame();
+    this.currentGameId = gameId;
 
-    if (this.clients.player1) {
-      this.clients.player1.lastPaddleX = 0.5;
-      this.clients.player1.lastPaddleTime = performance.now();
-    }
-    if (this.clients.player2) {
-      this.clients.player2.lastPaddleX = 0.5;
-      this.clients.player2.lastPaddleTime = performance.now();
-    }
+    if (gameId === 'pong') {
+      this.currentGame = new PongGameModule();
+      this.currentGame.init();
 
-    // Send 'start' message to each client with their role
-    if (this.clients.player1?.readyState === WebSocket.OPEN) {
-      this.clients.player1.send(
-        JSON.stringify({
-          type: 'start',
-          role: 'player1',
-          config: CONFIG,
-          state: this.engine.getSnapshot(),
-          colors: {
-            player1: this.clients.player1?.customColor || null,
-            trails_player1: this.clients.player1?.customTrail || null,
-            player2: this.clients.player2?.customColor || null,
-            trails_player2: this.clients.player2?.customTrail || null,
-          },
-        })
-      );
-    }
+      if (this.clients.player1) {
+        this.clients.player1.lastPaddleX = 0.5;
+        this.clients.player1.lastPaddleTime = performance.now();
+      }
+      if (this.clients.player2) {
+        this.clients.player2.lastPaddleX = 0.5;
+        this.clients.player2.lastPaddleTime = performance.now();
+      }
 
-    if (this.clients.player2?.readyState === WebSocket.OPEN) {
-      this.clients.player2.send(
-        JSON.stringify({
-          type: 'start',
-          role: 'player2',
-          config: CONFIG,
-          state: this.engine.getSnapshot(),
-          colors: {
-            player1: this.clients.player1?.customColor || null,
-            trails_player1: this.clients.player1?.customTrail || null,
-            player2: this.clients.player2?.customColor || null,
-            trails_player2: this.clients.player2?.customTrail || null,
-          },
-        })
-      );
-    }
+      // Notify clients of game_start and pong 'start'
+      this.broadcast({
+        type: 'game_start',
+        gameId: 'pong',
+        config: CONFIG,
+      });
 
-    this.startGameLoop();
+      if (this.clients.player1?.readyState === WebSocket.OPEN) {
+        this.clients.player1.send(
+          JSON.stringify({
+            type: 'start',
+            role: 'player1',
+            config: CONFIG,
+            state: this.currentGame.getState(),
+            colors: {
+              player1: this.clients.player1?.customColor || null,
+              trails_player1: this.clients.player1?.customTrail || null,
+              player2: this.clients.player2?.customColor || null,
+              trails_player2: this.clients.player2?.customTrail || null,
+            },
+          })
+        );
+      }
+
+      if (this.clients.player2?.readyState === WebSocket.OPEN) {
+        this.clients.player2.send(
+          JSON.stringify({
+            type: 'start',
+            role: 'player2',
+            config: CONFIG,
+            state: this.currentGame.getState(),
+            colors: {
+              player1: this.clients.player1?.customColor || null,
+              trails_player1: this.clients.player1?.customTrail || null,
+              player2: this.clients.player2?.customColor || null,
+              trails_player2: this.clients.player2?.customTrail || null,
+            },
+          })
+        );
+      }
+
+      this.startGameLoop();
+    } else if (gameId === 'connect4') {
+      this.currentGame = new Connect4Module();
+      // Reuse persisted scores
+      this.currentGame.scores = this.connect4Scores;
+      this.currentGame.init();
+
+      this.broadcast({
+        type: 'game_start',
+        gameId: 'connect4',
+        config: CONFIG,
+        state: this.currentGame.getState(),
+        colors: {
+          player1: this.clients.player1?.customColor || null,
+          player2: this.clients.player2?.customColor || null,
+        },
+      });
+    }
   }
 
   startGameLoop() {
@@ -395,9 +528,10 @@ export class PongServer {
     const deltaTime = 1 / CONFIG.TICK_RATE_HZ;
 
     this.gameLoopInterval = setInterval(() => {
-      const event = this.engine.tick(deltaTime);
+      if (!this.currentGame || this.currentGameId !== 'pong') return;
 
-      const snapshot = this.engine.getSnapshot();
+      const event = this.currentGame.tick(deltaTime);
+      const snapshot = this.currentGame.getState();
 
       if (event) {
         if (event.type === 'point') {
@@ -427,6 +561,15 @@ export class PongServer {
     }, intervalMs);
   }
 
+  stopCurrentGame() {
+    if (this.gameLoopInterval) {
+      clearInterval(this.gameLoopInterval);
+      this.gameLoopInterval = null;
+    }
+    this.currentGame = null;
+    this.currentGameId = null;
+  }
+
   broadcast(message) {
     const payload = JSON.stringify(message);
     if (this.clients.player1?.readyState === WebSocket.OPEN) {
@@ -452,10 +595,15 @@ export class PongServer {
   }
 
   stop() {
-    if (this.gameLoopInterval) {
-      clearInterval(this.gameLoopInterval);
-      this.gameLoopInterval = null;
+    if (this._defaultEngine) {
+      this._defaultEngine.state.phase = 'paused';
     }
+    if (this.currentGame?.engine) {
+      this.currentGame.engine.state.phase = 'paused';
+    }
+
+    this.stopCurrentGame();
+    this.lobby.reset();
 
     if (this.bonjour) {
       try {
@@ -497,7 +645,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.start().then((port) => {
     const ip = getLocalIP();
     console.log('====================================================');
-    console.log(' PONG SERVER RUNNING (LAN)');
+    console.log(' LOCALPONG MULTI-GAME SERVER RUNNING (LAN)');
     console.log('====================================================');
     console.log(` Local access: http://localhost:${port}`);
     console.log(` mDNS access:  http://${CONFIG.HOST_NAME}.local:${port}`);
@@ -505,7 +653,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log('====================================================');
 
     const cleanup = () => {
-      console.log('\nShutting down Pong server...');
+      console.log('\nShutting down server...');
       server.stop();
       process.exit();
     };
@@ -513,7 +661,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.on('SIGINT', cleanup);
     process.on('SIGTERM', cleanup);
   }).catch((err) => {
-    console.error('Failed to start Pong server:', err);
+    console.error('Failed to start server:', err);
     process.exit(1);
   });
 }

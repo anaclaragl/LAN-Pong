@@ -45,7 +45,7 @@ test('PongServer starts and serves /api/info and static assets', async () => {
 
 test('PongServer manages 2-player match lifecycle and rejects 3rd player', async () => {
   // Allow multiple connections from localhost for this protocol test to reach "Match full"
-  const server = new PongServer(0, { maxConnectionsPerIp: 10 });
+  const server = new PongServer(0, { maxConnectionsPerIp: 10, countdownSeconds: 0.05 });
   const port = await server.start();
 
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -69,8 +69,17 @@ test('PongServer manages 2-player match lifecycle and rejects 3rd player', async
 
     await new Promise((res) => p2.on('open', res));
 
-    // Both should receive 'start' message
-    await new Promise((res) => setTimeout(res, 100));
+    // Both should receive lobby message
+    await new Promise((res) => setTimeout(res, 50));
+    assert.ok(p1Messages.some((m) => m.type === 'lobby'));
+    assert.ok(p2Messages.some((m) => m.type === 'lobby'));
+
+    // Both players vote for pong
+    p1.send(JSON.stringify({ type: 'vote', gameId: 'pong' }));
+    p2.send(JSON.stringify({ type: 'vote', gameId: 'pong' }));
+
+    // Wait for agreement countdown + game_start
+    await new Promise((res) => setTimeout(res, 150));
 
     const p1Start = p1Messages.find((m) => m.type === 'start');
     const p2Start = p2Messages.find((m) => m.type === 'start');

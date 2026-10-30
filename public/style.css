@@ -53,6 +53,11 @@ body.light-mode {
   cursor: none;
 }
 
+/* Connect 4 needs pointer cursor for clicking columns */
+#game-container.connect4-active {
+  cursor: pointer !important;
+}
+
 .theme-toggle {
   position: absolute;
   top: 12px;
@@ -149,31 +154,37 @@ body.light-mode .theme-toggle .moon-icon {
 }
 
 .game-title {
-  font-size: 48px;
-  letter-spacing: 8px;
+  font-size: 40px;
+  letter-spacing: 6px;
   margin-bottom: 8px;
   font-weight: bold;
 }
 
 .subtitle {
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 2px;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
 }
 
 .screen-title {
   font-size: 20px;
   letter-spacing: 2px;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   font-weight: bold;
+}
+
+.lobby-subtitle {
+  font-size: 11px;
+  letter-spacing: 1px;
+  margin-bottom: 24px;
 }
 
 .menu-actions {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: 80%;
-  max-width: 260px;
+  gap: 14px;
+  width: 85%;
+  max-width: 280px;
 }
 
 .btn {
@@ -181,7 +192,7 @@ body.light-mode .theme-toggle .moon-icon {
   color: var(--fg-color);
   border: 2px solid var(--fg-color);
   padding: 12px 20px;
-  font-size: 16px;
+  font-size: 15px;
   font-family: inherit;
   font-weight: bold;
   cursor: pointer;
@@ -254,7 +265,7 @@ body.light-mode .theme-toggle .moon-icon {
 .final-score-text {
   font-size: 32px;
   font-weight: bold;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
   letter-spacing: 4px;
 }
 
@@ -264,7 +275,95 @@ body.light-mode .theme-toggle .moon-icon {
   line-height: 1.5;
 }
 
-/* Inventory Screen */
+/* -------------------------------------------------------------
+   Lobby & Voting System
+   ------------------------------------------------------------- */
+.lobby-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 90%;
+  max-width: 340px;
+  margin-bottom: 20px;
+}
+
+.game-card {
+  position: relative;
+  border: 2px solid var(--fg-color);
+  background-color: var(--bg-color);
+  color: var(--fg-color);
+  padding: 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.12s ease, background-color 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-card:hover {
+  transform: translateY(-2px);
+  border-width: 3px;
+}
+
+.game-card.my-vote {
+  border-width: 3px;
+}
+
+.game-card-title {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+}
+
+.game-card-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+/* Voting Badges */
+.vote-indicators {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.vote-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50% !important;
+  background-color: #FFFFFF;
+  color: #000000;
+  border: 2px solid #000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-weight: bold;
+  font-size: 15px;
+}
+
+.lobby-banner {
+  border: 1px dashed var(--fg-color);
+  padding: 12px 16px;
+  width: 90%;
+  max-width: 340px;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.lobby-countdown-box {
+  margin-top: 8px;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+/* -------------------------------------------------------------
+   Inventory Screen
+   ------------------------------------------------------------- */
 .inventory-tabs {
   display: flex;
   gap: 8px;
